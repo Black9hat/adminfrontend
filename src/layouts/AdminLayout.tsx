@@ -1,8 +1,9 @@
-import { Link, Outlet, useNavigate } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { useAuth } from "../AuthContext";
 
 export default function AdminLayout() {
-  const navigate = useNavigate();
+  const { logout } = useAuth();
   const [darkMode, setDarkMode] = useState(
     localStorage.getItem("theme") === "dark"
   );
@@ -19,8 +20,7 @@ export default function AdminLayout() {
   }, [darkMode]);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    navigate("/login");
+    logout();
   };
 
   return (
@@ -31,7 +31,7 @@ export default function AdminLayout() {
           Go India Admin
         </h2>
         <nav className="flex flex-col gap-2">
-          <Link to="/" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
+         <Link to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
           <Link to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
           <Link to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
           <Link to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
@@ -49,7 +49,7 @@ export default function AdminLayout() {
               Go India Admin
             </h2>
             <nav className="flex flex-col gap-2">
-              <Link onClick={() => setSidebarOpen(false)} to="/" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
+             <Link onClick={() => setSidebarOpen(false)} to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
               <Link onClick={() => setSidebarOpen(false)} to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
               <Link onClick={() => setSidebarOpen(false)} to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
               <Link onClick={() => setSidebarOpen(false)} to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
