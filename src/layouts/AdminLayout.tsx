@@ -25,51 +25,57 @@ export default function AdminLayout() {
 
   return (
     <div className="flex min-h-screen bg-gray-100 dark:bg-gray-900">
-      {/* Sidebar (desktop) */}
-      <aside className="hidden md:block w-64 bg-white dark:bg-gray-800 shadow-lg p-4">
-        <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-gray-100">
-          Go India Admin
-        </h2>
-        <nav className="flex flex-col gap-2">
-         <Link to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
-          <Link to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
-          <Link to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
-          <Link to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
-          <Link to="/documents" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Documents</Link>
-          <Link to="/notifications" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Notifications</Link>
-          <Link to="/settings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Settings</Link>
-        </nav>
-      </aside>
+{/* Sidebar (desktop) */}
+<aside className="hidden md:block w-64 bg-white dark:bg-gray-800 shadow-lg p-4">
+  <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-gray-100">
+    Go India Admin
+  </h2>
+  <nav className="flex flex-col gap-2">
+    <Link to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
+    <Link to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
+    <Link to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
+    <Link to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
+    <Link to="/documents" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Documents</Link>
+    <Link to="/notifications" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Notifications</Link>
+    <Link to="/fare-management" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">💰 Fare Management</Link>
+    <Link to="/settings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Settings</Link>
+        <Link to="/IncentiveSettings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">IncentiveSettings</Link>
 
-      {/* Sidebar (mobile overlay) */}
-      {sidebarOpen && (
-        <div className="fixed inset-0 z-40 flex md:hidden">
-          <div className="w-64 bg-white dark:bg-gray-800 shadow-lg p-4">
-            <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-gray-100">
-              Go India Admin
-            </h2>
-            <nav className="flex flex-col gap-2">
-             <Link onClick={() => setSidebarOpen(false)} to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/documents" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Documents</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/notifications" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Notifications</Link>
-              <Link onClick={() => setSidebarOpen(false)} to="/settings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Settings</Link>
-            </nav>
-            <button
-              className="mt-6 text-red-500 font-medium"
-              onClick={() => setSidebarOpen(false)}
-            >
-              Close
-            </button>
-          </div>
-          <div
-            className="flex-1 bg-black bg-opacity-50"
-            onClick={() => setSidebarOpen(false)}
-          />
-        </div>
-      )}
+  </nav>
+</aside>
+
+{/* Sidebar (mobile overlay) */}
+{sidebarOpen && (
+  <div className="fixed inset-0 z-40 flex md:hidden">
+    <div className="w-64 bg-white dark:bg-gray-800 shadow-lg p-4">
+      <h2 className="text-xl font-bold mb-6 text-gray-800 dark:text-gray-100">
+        Go India Admin
+      </h2>
+      <nav className="flex flex-col gap-2">
+        <Link onClick={() => setSidebarOpen(false)} to="/dashboard" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Dashboard</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/drivers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Drivers</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/trips" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Trips</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/customers" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Customers</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/documents" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Documents</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/notifications" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Notifications</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/fare-management" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">💰 Fare Management</Link>
+        <Link onClick={() => setSidebarOpen(false)} to="/settings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">Settings</Link>
+                <Link onClick={() => setSidebarOpen(false)} to="/IncentiveSettings" className="hover:bg-gray-200 dark:hover:bg-gray-700 p-2 rounded text-gray-700 dark:text-gray-200">💰IncentiveSettings</Link>
+
+      </nav>
+      <button
+        className="mt-6 text-red-500 font-medium"
+        onClick={() => setSidebarOpen(false)}
+      >
+        Close
+      </button>
+    </div>
+    <div
+      className="flex-1 bg-black bg-opacity-50"
+      onClick={() => setSidebarOpen(false)}
+    />
+  </div>
+)}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col">

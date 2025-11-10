@@ -21,6 +21,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-router-dom": "^7.8.1",
+    "react-toastify": "^11.0.5",
     "recharts": "^3.2.1"
   },
   "devDependencies": {
@@ -37,6 +38,6 @@
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.11"
   }
 }

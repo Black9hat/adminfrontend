@@ -11,6 +11,8 @@ import Notifications from "./pages/Notifications";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import { AuthProvider } from "./AuthContext";
+import FareManagement from "./pages/FareManagement";
+import IncentiveSettings from "./pages/IncentivesManagement";
 
 export default function AppRoutes() {
   return (
@@ -39,6 +41,10 @@ export default function AppRoutes() {
             <Route path="documents" element={<Documents />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="settings" element={<Settings />} />
+                        <Route path="fare-management" element={<FareManagement />} />
+                                                <Route path="IncentiveSettings" element={<IncentiveSettings />} />
+
+
           </Route>
         </Routes>
       </BrowserRouter>
