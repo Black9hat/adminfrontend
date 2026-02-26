@@ -41,6 +41,7 @@ const AdminSupport         = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage     = lazy(() => import("./pages/Notifications"));
 const HelpManagement       = lazy(() => import("./pages/Helpmanagement"));
 const DocumentsPage        = lazy(() => import("./pages/Documents"));   // ✅ added
+const CouponsManagement    = lazy(() => import("./pages/Couponsmanagement")); // ✅ added
 
 const Loading = () => <Spinner label="Loading page…" />;
 
@@ -86,6 +87,7 @@ export default function AppRoutes() {
           <Route path="/fare-pricing"       element={<FarePricing />} />
           <Route path="/promotions"         element={<AdminPromotions />} />
           <Route path="/incentives"         element={<IncentivesManagement />} />
+          <Route path="/coupons"            element={<CouponsManagement />} />
 
           {/* Safety & Trust */}
           <Route path="/safety"             element={<SafetyComplaints />} />
