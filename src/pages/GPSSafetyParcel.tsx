@@ -1,16 +1,261 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE 3 — GPS & Location Monitoring
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { RefreshCw, MapPin, Navigation, AlertTriangle } from "lucide-react";
 import { useTrips, useDrivers, useMutation } from "../hooks";
 import {
   Badge, Btn, Card, Table, TR, TD, Modal, Spinner, PageError, Empty,
-  PageHeader, SearchBar, StatCard, SectionLabel, InfoRow, C,
-  MapPlaceholder, Tabs,
+  PageHeader, SearchBar, StatCard, SectionLabel, InfoRow, C, Tabs,
 } from "../components/ui";
 import { toast } from "react-toastify";
+import {
+  GoogleMap,
+  useJsApiLoader,
+  Marker,
+  InfoWindow,
+  Polyline,
+} from "@react-google-maps/api";
 
+// ── Google Maps API key from .env ─────────────────────────────────────────────
+const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY ?? "";
+
+// ── Map dark style matching admin panel ───────────────────────────────────────
+const DARK_STYLE = [
+  { elementType: "geometry",        stylers: [{ color: "#0e1015" }] },
+  { elementType: "labels.text.fill",stylers: [{ color: "#6b7280" }] },
+  { elementType: "labels.text.stroke",stylers:[{ color: "#0e1015" }] },
+  { featureType: "road",            elementType: "geometry",       stylers: [{ color: "#1e2330" }] },
+  { featureType: "road",            elementType: "geometry.stroke",stylers: [{ color: "#13161e" }] },
+  { featureType: "road",            elementType: "labels.text.fill",stylers:[{ color: "#4a5568" }] },
+  { featureType: "water",           elementType: "geometry",       stylers: [{ color: "#080a0f" }] },
+  { featureType: "water",           elementType: "labels.text.fill",stylers:[{ color: "#374151" }] },
+  { featureType: "poi",             stylers: [{ visibility: "off" }] },
+  { featureType: "transit",         stylers: [{ visibility: "off" }] },
+  { featureType: "administrative",  elementType: "geometry",       stylers: [{ color: "#1e2330" }] },
+];
+
+const MAP_OPTIONS = {
+  styles: DARK_STYLE,
+  disableDefaultUI: false,
+  zoomControl: true,
+  mapTypeControl: false,
+  streetViewControl: false,
+  fullscreenControl: true,
+};
+
+// ── Default center: India ──────────────────────────────────────────────────────
+const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
+
+// ── Reusable map container ────────────────────────────────────────────────────
+interface LiveMapProps {
+  drivers?: any[];
+  activeRides?: any[];
+  focusDriver?: any;
+  focusRide?: any;
+  height?: number;
+}
+
+function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, height = 500 }: LiveMapProps) {
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: MAPS_KEY,
+    id: "goindia-map",
+  });
+
+  const [activeMarker, setActiveMarker] = useState<string | null>(null);
+
+  const center = useMemo(() => {
+    if (focusDriver?.currentLocation?.coordinates) {
+      const [lng, lat] = focusDriver.currentLocation.coordinates;
+      return { lat, lng };
+    }
+    if (focusRide?.pickup?.location?.coordinates) {
+      const [lng, lat] = focusRide.pickup.location.coordinates;
+      return { lat, lng };
+    }
+    // Center on first online driver with location
+    const first = drivers.find(d => d.currentLocation?.coordinates);
+    if (first) {
+      const [lng, lat] = first.currentLocation.coordinates;
+      return { lat, lng };
+    }
+    return DEFAULT_CENTER;
+  }, [drivers, focusDriver, focusRide]);
+
+  const zoom = focusDriver || focusRide ? 14 : 11;
+
+  // Route polyline for focused ride
+  const routePath = useMemo(() => {
+    if (!focusRide) return [];
+    const path = [];
+    if (focusRide.pickup?.location?.coordinates) {
+      const [lng, lat] = focusRide.pickup.location.coordinates;
+      path.push({ lat, lng });
+    }
+    if (focusRide.drop?.location?.coordinates) {
+      const [lng, lat] = focusRide.drop.location.coordinates;
+      path.push({ lat, lng });
+    }
+    return path;
+  }, [focusRide]);
+
+  if (!MAPS_KEY) {
+    return (
+      <div style={{
+        height, background: "#0e1015", borderRadius: 12,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        border: "1px dashed #1e2330", gap: 10,
+      }}>
+        <span style={{ fontSize: "2rem" }}>🗺️</span>
+        <div style={{ color: "#4a5568", fontSize: "0.82rem", fontFamily: "monospace", textAlign: "center" }}>
+          Add <span style={{ color: "#6366f1" }}>VITE_GOOGLE_MAPS_KEY</span> to your <span style={{ color: "#f59e0b" }}>.env</span> file<br />
+          then redeploy to enable live map
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ height, background: "#0e1015", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "#f87171", fontSize: "0.85rem" }}>⚠️ Maps failed to load — check your API key &amp; billing</div>
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div style={{ height, background: "#0e1015", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: "#6b7280", fontSize: "0.82rem", fontFamily: "monospace" }}>Loading map…</div>
+      </div>
+    );
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={{ width: "100%", height, borderRadius: 12 }}
+      center={center}
+      zoom={zoom}
+      options={MAP_OPTIONS}
+    >
+      {/* ── Driver markers ───────────────────────────────────────────────── */}
+      {drivers.map(d => {
+        if (!d.currentLocation?.coordinates) return null;
+        const [lng, lat] = d.currentLocation.coordinates;
+        const id = "driver-" + d._id;
+        return (
+          <Marker
+            key={id}
+            position={{ lat, lng }}
+            title={d.name}
+            icon={{
+              url: "data:image/svg+xml;utf8," + encodeURIComponent(
+                `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+                  <circle cx="16" cy="16" r="14" fill="#6366f1" stroke="#fff" stroke-width="2"/>
+                  <text x="16" y="21" text-anchor="middle" font-size="14">🏍️</text>
+                </svg>`
+              ),
+              scaledSize: new window.google.maps.Size(36, 36),
+              anchor: new window.google.maps.Point(18, 18),
+            }}
+            onClick={() => setActiveMarker(activeMarker === id ? null : id)}
+          >
+            {activeMarker === id && (
+              <InfoWindow onCloseClick={() => setActiveMarker(null)}>
+                <div style={{ fontFamily: "sans-serif", fontSize: 13, minWidth: 140 }}>
+                  <strong>{d.name}</strong><br />
+                  📱 {d.phone}<br />
+                  🚗 {d.vehicleType} · {d.vehicleNumber}<br />
+                  <span style={{ color: "#22c55e" }}>● Online</span>
+                </div>
+              </InfoWindow>
+            )}
+          </Marker>
+        );
+      })}
+
+      {/* ── Active ride pickup/drop markers ──────────────────────────────── */}
+      {activeRides.map(t => {
+        const results = [];
+        if (t.pickup?.location?.coordinates) {
+          const [lng, lat] = t.pickup.location.coordinates;
+          const id = "pickup-" + t._id;
+          results.push(
+            <Marker
+              key={id}
+              position={{ lat, lng }}
+              title={"Pickup: " + (t.pickup?.address ?? "")}
+              icon={{
+                url: "data:image/svg+xml;utf8," + encodeURIComponent(
+                  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+                    <circle cx="14" cy="14" r="12" fill="#22c55e" stroke="#fff" stroke-width="2"/>
+                    <text x="14" y="19" text-anchor="middle" font-size="12">📍</text>
+                  </svg>`
+                ),
+                scaledSize: new window.google.maps.Size(30, 30),
+                anchor: new window.google.maps.Point(15, 15),
+              }}
+              onClick={() => setActiveMarker(activeMarker === id ? null : id)}
+            >
+              {activeMarker === id && (
+                <InfoWindow onCloseClick={() => setActiveMarker(null)}>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 13 }}>
+                    <strong>Pickup</strong><br />
+                    {t.pickup?.address ?? "—"}<br />
+                    Ride #{t._id.slice(-8).toUpperCase()}
+                  </div>
+                </InfoWindow>
+              )}
+            </Marker>
+          );
+        }
+        if (t.drop?.location?.coordinates) {
+          const [lng, lat] = t.drop.location.coordinates;
+          const id = "drop-" + t._id;
+          results.push(
+            <Marker
+              key={id}
+              position={{ lat, lng }}
+              title={"Drop: " + (t.drop?.address ?? "")}
+              icon={{
+                url: "data:image/svg+xml;utf8," + encodeURIComponent(
+                  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+                    <circle cx="14" cy="14" r="12" fill="#ef4444" stroke="#fff" stroke-width="2"/>
+                    <text x="14" y="19" text-anchor="middle" font-size="12">🏁</text>
+                  </svg>`
+                ),
+                scaledSize: new window.google.maps.Size(30, 30),
+                anchor: new window.google.maps.Point(15, 15),
+              }}
+              onClick={() => setActiveMarker(activeMarker === id ? null : id)}
+            >
+              {activeMarker === id && (
+                <InfoWindow onCloseClick={() => setActiveMarker(null)}>
+                  <div style={{ fontFamily: "sans-serif", fontSize: 13 }}>
+                    <strong>Drop</strong><br />
+                    {t.drop?.address ?? "—"}<br />
+                    Ride #{t._id.slice(-8).toUpperCase()}
+                  </div>
+                </InfoWindow>
+              )}
+            </Marker>
+          );
+        }
+        return results;
+      })}
+
+      {/* ── Route polyline for focused ride ──────────────────────────────── */}
+      {routePath.length === 2 && (
+        <Polyline
+          path={routePath}
+          options={{ strokeColor: "#6366f1", strokeWeight: 3, strokeOpacity: 0.85 }}
+        />
+      )}
+    </GoogleMap>
+  );
+}
+
+// ── GPSMonitoring page ────────────────────────────────────────────────────────
 export function GPSMonitoring() {
   const { trips, loading, error, refetch } = useTrips();
   const { drivers } = useDrivers();
@@ -32,16 +277,20 @@ export function GPSMonitoring() {
 
       {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Online Drivers"    value={activeDrivers.length}  icon="🟢" color="#22c55e" />
-        <StatCard label="Broadcasting GPS"  value={withLocation.length}   icon="📡" color="#6366f1" />
-        <StatCard label="Active Rides"      value={activeRides.length}    icon="🚘" color="#f59e0b" />
-        <StatCard label="Offline Drivers"   value={drivers.length - activeDrivers.length} icon="⚫" color="#6b7280" />
+        <StatCard label="Online Drivers"   value={activeDrivers.length}                    icon="🟢" color="#22c55e" />
+        <StatCard label="Broadcasting GPS" value={withLocation.length}                     icon="📡" color="#6366f1" />
+        <StatCard label="Active Rides"     value={activeRides.length}                      icon="🚘" color="#f59e0b" />
+        <StatCard label="Offline Drivers"  value={drivers.length - activeDrivers.length}   icon="⚫" color="#6b7280" />
       </div>
 
-      {/* Live Map */}
-      <Card style={{ marginBottom: "1.5rem" }}>
-        <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>🗺️ Live Map — All Drivers & Active Rides</div>
-        <MapPlaceholder label="Add VITE_GOOGLE_MAPS_KEY to .env to enable live driver map with markers" height={500} />
+      {/* ── Live Map ──────────────────────────────────────────────────────── */}
+      <Card style={{ marginBottom: "1.5rem", overflow: "hidden" }}>
+        <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>
+          🗺️ Live Map — All Drivers &amp; Active Rides
+        </div>
+        <div style={{ padding: "0.875rem" }}>
+          <LiveMap drivers={withLocation} activeRides={activeRides} height={500} />
+        </div>
       </Card>
 
       {/* Driver location table */}
@@ -49,7 +298,7 @@ export function GPSMonitoring() {
         <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>📍 Driver Locations</div>
         <Table headers={["Driver", "Vehicle", "Status", "GPS Coordinates", "Active Ride", "Action"]} isEmpty={activeDrivers.length === 0} emptyMessage="No drivers online">
           {activeDrivers.map((d: any) => {
-            const ride = activeRides.find((t: any) => t.assignedDriver?._id === d._id);
+            const ride   = activeRides.find((t: any) => t.assignedDriver?._id === d._id);
             const coords = d.currentLocation?.coordinates;
             return (
               <TR key={d._id} onClick={() => setSel({ type: "driver", data: d })}>
@@ -69,7 +318,7 @@ export function GPSMonitoring() {
         </Table>
       </Card>
 
-      {/* Active rides with polyline info */}
+      {/* Active rides table */}
       <Card>
         <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>🚘 Active Rides — Route Details</div>
         <Table headers={["Ride ID", "Customer", "Driver", "Pickup", "Drop", "Fare", ""]} isEmpty={activeRides.length === 0} emptyMessage="No active rides">
@@ -87,22 +336,22 @@ export function GPSMonitoring() {
         </Table>
       </Card>
 
-      {/* Detail modal */}
-      <Modal open={!!sel} onClose={() => setSel(null)} title={sel?.type === "driver" ? "Driver Location" : "Ride Route"} width={500}>
+      {/* Detail modal with real map */}
+      <Modal open={!!sel} onClose={() => setSel(null)} title={sel?.type === "driver" ? "Driver Location" : "Ride Route"} width={560}>
         {sel?.type === "driver" && sel.data && (
           <>
-            <MapPlaceholder label={"Driver: " + sel.data.name + " — GPS map"} height={280} />
+            <LiveMap focusDriver={sel.data} drivers={[sel.data]} height={280} />
             <div style={{ marginTop: "0.875rem" }}>
-              <InfoRow label="Driver" value={sel.data.name} />
-              <InfoRow label="Phone" value={sel.data.phone} />
-              <InfoRow label="Vehicle" value={sel.data.vehicleType} />
-              <InfoRow label="Coordinates" value={sel.data.currentLocation?.coordinates ? sel.data.currentLocation.coordinates.join(", ") : "—"} />
+              <InfoRow label="Driver"      value={sel.data.name} />
+              <InfoRow label="Phone"       value={sel.data.phone} />
+              <InfoRow label="Vehicle"     value={sel.data.vehicleType} />
+              <InfoRow label="Coordinates" value={sel.data.currentLocation?.coordinates ? sel.data.currentLocation.coordinates[1].toFixed(6) + ", " + sel.data.currentLocation.coordinates[0].toFixed(6) : "—"} />
             </div>
           </>
         )}
         {sel?.type === "ride" && sel.data && (
           <>
-            <MapPlaceholder label={"Route polyline — pickup → drop for #" + sel.data._id.slice(-8).toUpperCase()} height={280} />
+            <LiveMap focusRide={sel.data} activeRides={[sel.data]} height={280} />
             <div style={{ marginTop: "0.875rem" }}>
               <InfoRow label="Pickup" value={sel.data.pickup?.address ?? "—"} />
               <InfoRow label="Drop"   value={sel.data.drop?.address ?? "—"} />
@@ -123,15 +372,13 @@ export function SafetyComplaints() {
   const { trips, loading, error, refetch } = useTrips();
   const { mutate, loading: acting } = useMutation();
 
-  const [tab, setTab]     = useState("all");
-  const [q, setQ]         = useState("");
-  const [sel, setSel]     = useState<any>(null);
-  const [confirm, setCf]  = useState<null | "block" | "suspend">(null);
-  const [selDriver, setSD]= useState<any>(null);
+  const [tab, setTab]      = useState("all");
+  const [q, setQ]          = useState("");
+  const [sel, setSel]      = useState<any>(null);
+  const [confirm, setCf]   = useState<null | "block" | "suspend">(null);
+  const [selDriver, setSD] = useState<any>(null);
 
-  const supportTrips = useMemo(() =>
-    trips.filter((t: any) => t.supportRequested),
-  [trips]);
+  const supportTrips = useMemo(() => trips.filter((t: any) => t.supportRequested), [trips]);
 
   const filtered = useMemo(() => {
     let base = supportTrips;
@@ -168,9 +415,8 @@ export function SafetyComplaints() {
         actions={<Btn icon={<RefreshCw size={14}/>} variant="ghost" onClick={refetch}>Refresh</Btn>}
       />
 
-      {/* Stats */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Total Complaints" value={supportTrips.length} icon="🆘" color={C.red}    />
+        <StatCard label="Total Complaints" value={supportTrips.length} icon="🆘" color={C.red}   />
         <StatCard label="Open"             value={supportTrips.filter((t: any) => !["completed","cancelled"].includes(t.status)).length} icon="🔴" color={C.amber} />
         <StatCard label="Emergency"        value={supportTrips.filter((t: any) => t.supportReason?.toLowerCase().includes("emergency")).length} icon="🚨" color={C.red} />
       </div>
@@ -199,7 +445,7 @@ export function SafetyComplaints() {
                 <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
                   {t.assignedDriver && (
                     <>
-                      <Btn size="sm" variant="danger" onClick={() => { setSD(t.assignedDriver); setCf("block"); }}>Block</Btn>
+                      <Btn size="sm" variant="danger"  onClick={() => { setSD(t.assignedDriver); setCf("block");   }}>Block</Btn>
                       <Btn size="sm" variant="warning" onClick={() => { setSD(t.assignedDriver); setCf("suspend"); }}>Suspend</Btn>
                     </>
                   )}
@@ -210,7 +456,6 @@ export function SafetyComplaints() {
         </Table>
       </Card>
 
-      {/* Complaint detail */}
       <Modal open={!!sel && !confirm} onClose={() => setSel(null)} title={"Complaint — #" + (sel?._id?.slice(-8).toUpperCase() ?? "")}>
         {sel && (
           <>
@@ -221,7 +466,7 @@ export function SafetyComplaints() {
             <InfoRow label="Created"     value={new Date(sel.createdAt).toLocaleString("en-IN")} />
             {sel.assignedDriver && (
               <div style={{ display: "flex", gap: 8, marginTop: "1rem" }}>
-                <Btn variant="danger" onClick={() => { setSD(sel.assignedDriver); setCf("block"); }}>Block Driver</Btn>
+                <Btn variant="danger"  onClick={() => { setSD(sel.assignedDriver); setCf("block");   }}>Block Driver</Btn>
                 <Btn variant="warning" onClick={() => { setSD(sel.assignedDriver); setCf("suspend"); }}>Suspend Driver</Btn>
               </div>
             )}
@@ -232,14 +477,15 @@ export function SafetyComplaints() {
       <Modal open={confirm === "block"} onClose={() => setCf(null)} title="Block Driver" width={380}>
         <p style={{ color: C.muted, marginBottom: "1rem", fontSize: "0.88rem" }}>Block <strong style={{ color: C.text }}>{selDriver?.name}</strong>? They won't be able to accept rides.</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Btn variant="ghost" onClick={() => setCf(null)}>Cancel</Btn>
+          <Btn variant="ghost"  onClick={() => setCf(null)}>Cancel</Btn>
           <Btn variant="danger" onClick={doBlock} loading={acting}>Block Driver</Btn>
         </div>
       </Modal>
+
       <Modal open={confirm === "suspend"} onClose={() => setCf(null)} title="Suspend Driver" width={380}>
         <p style={{ color: C.muted, marginBottom: "1rem", fontSize: "0.88rem" }}>Suspend <strong style={{ color: C.text }}>{selDriver?.name}</strong> temporarily?</p>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Btn variant="ghost" onClick={() => setCf(null)}>Cancel</Btn>
+          <Btn variant="ghost"   onClick={() => setCf(null)}>Cancel</Btn>
           <Btn variant="warning" onClick={doSuspend} loading={acting}>Suspend</Btn>
         </div>
       </Modal>
@@ -253,7 +499,7 @@ export function SafetyComplaints() {
 export function ParcelManagement() {
   const { trips, loading, error, refetch } = useTrips();
   const { mutate, loading: acting } = useMutation();
-  const [q, setQ] = useState("");
+  const [q, setQ]     = useState("");
   const [tab, setTab] = useState("all");
   const [sel, setSel] = useState<any>(null);
 
@@ -287,17 +533,17 @@ export function ParcelManagement() {
       />
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Total Parcels"  value={parcels.length}                                                          icon="📦" color={C.amber}  />
-        <StatCard label="In Transit"     value={parcels.filter((t: any) => t.status === "ride_started").length}                 icon="🚚" color={C.cyan}   />
-        <StatCard label="Delivered"      value={parcels.filter((t: any) => t.status === "completed").length}                    icon="✅" color={C.green}  />
-        <StatCard label="Cancelled"      value={parcels.filter((t: any) => t.status === "cancelled").length}                    icon="❌" color={C.red}    />
+        <StatCard label="Total Parcels" value={parcels.length}                                                   icon="📦" color={C.amber} />
+        <StatCard label="In Transit"    value={parcels.filter((t: any) => t.status === "ride_started").length}   icon="🚚" color={C.cyan}  />
+        <StatCard label="Delivered"     value={parcels.filter((t: any) => t.status === "completed").length}      icon="✅" color={C.green} />
+        <StatCard label="Cancelled"     value={parcels.filter((t: any) => t.status === "cancelled").length}      icon="❌" color={C.red}   />
       </div>
 
       <Tabs tabs={[
-        { key: "all",       label: "All",        count: parcels.length },
-        { key: "active",    label: "In Transit"  },
-        { key: "delivered", label: "Delivered"   },
-        { key: "cancelled", label: "Cancelled"   },
+        { key: "all",       label: "All",       count: parcels.length },
+        { key: "active",    label: "In Transit" },
+        { key: "delivered", label: "Delivered"  },
+        { key: "cancelled", label: "Cancelled"  },
       ]} active={tab} onChange={setTab} />
 
       <div style={{ display: "flex", gap: 10, margin: "1rem 0" }}>
@@ -318,9 +564,7 @@ export function ParcelManagement() {
               <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(t.createdAt).toLocaleDateString("en-IN")}</TD>
               <TD>
                 {!["completed","cancelled"].includes(t.status) && (
-                  <Btn size="sm" variant="danger" loading={acting} onClick={() => markLost(t._id)}>
-                    Mark Lost
-                  </Btn>
+                  <Btn size="sm" variant="danger" loading={acting} onClick={() => markLost(t._id)}>Mark Lost</Btn>
                 )}
               </TD>
             </TR>
@@ -328,7 +572,6 @@ export function ParcelManagement() {
         </Table>
       </Card>
 
-      {/* Parcel detail */}
       <Modal open={!!sel} onClose={() => setSel(null)} title={"Parcel #" + (sel?._id?.slice(-8).toUpperCase() ?? "")} width={520}>
         {sel && (
           <>
@@ -344,14 +587,14 @@ export function ParcelManagement() {
                 <div style={{ color: C.muted, fontFamily: "monospace", fontSize: "0.75rem" }}>{sel.parcelDetails?.receiverPhone}</div>
               </div>
             </div>
-            <InfoRow label="Status"       value={<Badge status={sel.status} />} />
-            <InfoRow label="Driver"       value={sel.assignedDriver?.name ?? "—"} />
-            <InfoRow label="OTP"          value={sel.otp ?? "—"} color={C.amber} />
-            <InfoRow label="Weight"       value={sel.parcelDetails?.weight ? sel.parcelDetails.weight + " kg" : "—"} />
-            <InfoRow label="Pickup"       value={sel.pickup?.address ?? "—"} />
-            <InfoRow label="Drop"         value={sel.drop?.address ?? "—"} />
-            <InfoRow label="Fare"         value={"₹" + (sel.finalFare ?? sel.fare ?? 0).toFixed(2)} color={C.amber} />
-            <InfoRow label="Created"      value={new Date(sel.createdAt).toLocaleString("en-IN")} />
+            <InfoRow label="Status"  value={<Badge status={sel.status} />} />
+            <InfoRow label="Driver"  value={sel.assignedDriver?.name ?? "—"} />
+            <InfoRow label="OTP"     value={sel.otp ?? "—"} color={C.amber} />
+            <InfoRow label="Weight"  value={sel.parcelDetails?.weight ? sel.parcelDetails.weight + " kg" : "—"} />
+            <InfoRow label="Pickup"  value={sel.pickup?.address ?? "—"} />
+            <InfoRow label="Drop"    value={sel.drop?.address ?? "—"} />
+            <InfoRow label="Fare"    value={"₹" + (sel.finalFare ?? sel.fare ?? 0).toFixed(2)} color={C.amber} />
+            <InfoRow label="Created" value={new Date(sel.createdAt).toLocaleString("en-IN")} />
             <div style={{ marginTop: "0.875rem", padding: "0.875rem", background: "#0e1015", borderRadius: 10, textAlign: "center", color: C.muted, fontSize: "0.8rem" }}>
               📷 Photo proof — requires driver app upload feature
             </div>
