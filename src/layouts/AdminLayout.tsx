@@ -5,7 +5,7 @@ import {
   Star, Monitor, UserCog, Zap, Search, Scale,
   DollarSign, ChevronDown, ChevronRight, LogOut, Menu, X,
   Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
-  FileText,
+  FileText, Ticket,
 } from "lucide-react";
 import { C } from "../components/ui";
 
@@ -60,6 +60,7 @@ const GROUPS: NavGroup[] = [
       { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={16} />        },
       { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={16} />    },
       { path: "/incentives",      label: "Incentives",         icon: <Gift size={16} />       },
+      { path: "/coupons",         label: "Coupons",            icon: <Ticket size={16} />     }, // ✅ added
     ],
   },
   {
