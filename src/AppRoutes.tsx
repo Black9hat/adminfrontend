@@ -40,6 +40,7 @@ const IncentivesManagement = lazy(() => import("./pages/IncentivesManagement"));
 const AdminSupport         = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage     = lazy(() => import("./pages/Notifications"));
 const HelpManagement       = lazy(() => import("./pages/Helpmanagement"));
+const DocumentsPage        = lazy(() => import("./pages/Documents"));   // ✅ added
 
 const Loading = () => <Spinner label="Loading page…" />;
 
@@ -48,13 +49,13 @@ export default function AppRoutes() {
     <Suspense fallback={<Loading />}>
       <Routes>
 
-        {/* ── Public: Login page (no auth required) ──────────────────────── */}
+        {/* ── Public: Login ──────────────────────────────────────────────── */}
         <Route path="/login" element={<Login />} />
 
         {/* ── Root redirect ──────────────────────────────────────────────── */}
         <Route path="/" element={<Navigate to="/analytics" replace />} />
 
-        {/* ── Protected: AdminLayout + all pages require a valid token ───── */}
+        {/* ── Protected: all pages require a valid token ─────────────────── */}
         <Route
           element={
             <RequireAuth>
@@ -70,6 +71,7 @@ export default function AppRoutes() {
           <Route path="/rides"              element={<RideManagement />} />
           <Route path="/drivers"            element={<DriverManagement />} />
           <Route path="/earnings"           element={<DriverEarnings />} />
+          <Route path="/documents"          element={<DocumentsPage />} />
           <Route path="/parcels"            element={<ParcelManagement />} />
           <Route path="/gps"                element={<GPSMonitoring />} />
           <Route path="/service-areas"      element={<ServiceAreas />} />

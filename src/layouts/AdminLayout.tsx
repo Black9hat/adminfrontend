@@ -2,9 +2,10 @@ import React, { useState } from "react";
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Car, Users, CreditCard, Map, Shield, Package,
-  Star, Monitor, UserCog, Zap, Search, BarChart3, Scale,
+  Star, Monitor, UserCog, Zap, Search, Scale,
   DollarSign, ChevronDown, ChevronRight, LogOut, Menu, X,
   Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
+  FileText,
 } from "lucide-react";
 import { C } from "../components/ui";
 
@@ -25,48 +26,49 @@ const GROUPS: NavGroup[] = [
     key: "overview",
     label: "Overview",
     items: [
-      { path: "/analytics",  label: "Analytics",   icon: <LayoutDashboard size={16} /> },
-      { path: "/money-flow", label: "Money Flow",   icon: <DollarSign size={16} /> },
+      { path: "/analytics",  label: "Analytics",  icon: <LayoutDashboard size={16} /> },
+      { path: "/money-flow", label: "Money Flow",  icon: <DollarSign size={16} /> },
     ],
   },
   {
     key: "ops",
     label: "Operations",
     items: [
-      { path: "/rides",    label: "Ride Management",    icon: <Car size={16} />     },
-      { path: "/drivers",  label: "Driver Management",  icon: <UserCog size={16} /> },
-      { path: "/earnings", label: "Driver Earnings",    icon: <TrendingUp size={16} /> },
-      { path: "/parcels",  label: "Parcel Delivery",    icon: <Package size={16} /> },
-      { path: "/gps",      label: "GPS Monitoring",     icon: <Map size={16} />     },
-      { path: "/service-areas", label: "Service Areas", icon: <MapPin size={16} />  },
+      { path: "/rides",         label: "Ride Management",   icon: <Car size={16} />        },
+      { path: "/drivers",       label: "Driver Management", icon: <UserCog size={16} />    },
+      { path: "/earnings",      label: "Driver Earnings",   icon: <TrendingUp size={16} /> },
+      { path: "/documents",     label: "Documents",         icon: <FileText size={16} />   },
+      { path: "/parcels",       label: "Parcel Delivery",   icon: <Package size={16} />    },
+      { path: "/gps",           label: "GPS Monitoring",    icon: <Map size={16} />        },
+      { path: "/service-areas", label: "Service Areas",     icon: <MapPin size={16} />     },
     ],
   },
   {
     key: "users",
     label: "Users",
     items: [
-      { path: "/customers", label: "User Accounts",  icon: <Users size={16} /> },
-      { path: "/ratings",   label: "Ratings",        icon: <Star size={16} />  },
+      { path: "/customers", label: "User Accounts", icon: <Users size={16} /> },
+      { path: "/ratings",   label: "Ratings",       icon: <Star size={16} />  },
     ],
   },
   {
     key: "finance",
     label: "Finance",
     items: [
-      { path: "/payments",        label: "Payments & Refunds", icon: <CreditCard size={16} />  },
-      { path: "/fare-management", label: "Fare Management",    icon: <Receipt size={16} />     },
-      { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={16} />         },
-      { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={16} />     },
-      { path: "/incentives",      label: "Incentives",         icon: <Gift size={16} />        },
+      { path: "/payments",        label: "Payments & Refunds", icon: <CreditCard size={16} /> },
+      { path: "/fare-management", label: "Fare Management",    icon: <Receipt size={16} />    },
+      { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={16} />        },
+      { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={16} />    },
+      { path: "/incentives",      label: "Incentives",         icon: <Gift size={16} />       },
     ],
   },
   {
     key: "safety",
     label: "Safety & Trust",
     items: [
-      { path: "/safety",  label: "Complaints",      icon: <Shield size={16} /> },
+      { path: "/safety",  label: "Complaints",      icon: <Shield size={16} />     },
       { path: "/support", label: "Admin Support",   icon: <HelpCircle size={16} /> },
-      { path: "/fraud",   label: "Fraud Detection", icon: <Search size={16} />  },
+      { path: "/fraud",   label: "Fraud Detection", icon: <Search size={16} />     },
     ],
   },
   {
@@ -140,7 +142,6 @@ export default function AdminLayout() {
         <nav style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: collapsed ? "0.5rem 0" : "0.5rem 0.5rem" }}>
           {GROUPS.map(group => (
             <div key={group.key} style={{ marginBottom: collapsed ? 0 : 4 }}>
-              {/* Group header */}
               {!collapsed && (
                 <button
                   onClick={() => toggle(group.key)}
@@ -151,7 +152,6 @@ export default function AdminLayout() {
                 </button>
               )}
 
-              {/* Items */}
               {(open[group.key] || collapsed) && group.items.map(item => {
                 const active = location.pathname === item.path || location.pathname.startsWith(item.path + "/");
                 return (
