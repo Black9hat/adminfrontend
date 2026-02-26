@@ -18,6 +18,10 @@ interface Offer {
   role: string;
 }
 
+// 🔧 API BASE URL Configuration
+// Uses VITE_API_URL environment variable (set in Render dashboard)
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+
 const NotificationPage: React.FC = () => {
   const { token } = useAuth();
   const [mode, setMode] = useState<"broadcast" | "individual">("broadcast");
@@ -49,10 +53,10 @@ const NotificationPage: React.FC = () => {
   const fetchUsers = async () => {
     try {
       const [driverRes, customerRes] = await Promise.all([
-        axios.get("/api/admin/drivers", {
+        axios.get(`${API_BASE_URL}/api/admin/drivers`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        axios.get("/api/admin/customers", {
+        axios.get(`${API_BASE_URL}/api/admin/customers`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);
@@ -68,7 +72,7 @@ const NotificationPage: React.FC = () => {
     try {
       setOffersLoading(true);
       setOffersError("");
-      const res = await axios.get("/api/admin/offers/all", {
+      const res = await axios.get(`${API_BASE_URL}/api/admin/offers/all`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setOffers(res.data.offers || []);
@@ -84,7 +88,7 @@ const NotificationPage: React.FC = () => {
       fetchUsers();
       fetchOffers();
     }
-  }, [token]);
+  }, [token, fetchOffers]);
 
   // ✅ Handle image selection
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,7 +133,7 @@ const NotificationPage: React.FC = () => {
       const formData = new FormData();
       formData.append("image", imageFile);
 
-      const response = await axios.post("/api/admin/upload-image", formData, {
+      const response = await axios.post(`${API_BASE_URL}/api/admin/upload-image`, formData, {
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "multipart/form-data",
@@ -173,7 +177,7 @@ const NotificationPage: React.FC = () => {
 
       if (mode === "broadcast") {
         await axios.post(
-          "/api/admin/send-fcm",
+          `${API_BASE_URL}/api/admin/send-fcm`,
           {
             title,
             body,
@@ -181,9 +185,11 @@ const NotificationPage: React.FC = () => {
             type: notificationType,
             imageUrl: uploadedImageUrl,
           },
-          { headers: { Authorization: `Bearer ${token}` } }
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
         );
-        setSuccess(`✅ ${notificationType === "promotion" ? "Offer" : "Notification"} sent successfully!`);
+        setSuccess("✅ Notification sent successfully!");
       } else {
         if (!selectedUser) {
           setError("Please select a user.");
@@ -191,56 +197,58 @@ const NotificationPage: React.FC = () => {
           return;
         }
         await axios.post(
-          "/api/admin/send-fcm/individual",
+          `${API_BASE_URL}/api/admin/send-individual-notification`,
           {
+            userId: selectedUser,
             title,
             body,
-            userId: selectedUser,
             type: notificationType,
             imageUrl: uploadedImageUrl,
           },
-          { headers: { Authorization: `Bearer ${token}` } }
+          {
+            headers: { Authorization: `Bearer ${token}` },
+          }
         );
-        setSuccess(`✅ ${notificationType === "promotion" ? "Offer" : "Message"} sent successfully!`);
+        setSuccess("✅ Notification sent to user successfully!");
       }
 
-      // Reset form
       setTitle("");
       setBody("");
-      setSelectedUser("");
+      setImageFile(null);
+      setImagePreview("");
       removeImage();
-
-      // ✅ Refresh offers list if a promotion was sent
-      if (notificationType === "promotion") {
-        setTimeout(() => fetchOffers(), 800);
-      }
+      await fetchOffers();
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to send notification.");
+      setError(err.response?.data?.message || "Failed to send notification");
+      console.error("❌ Error sending notification:", err);
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ Delete offer handler
+  // ✅ Handle delete offer
   const handleDeleteOffer = async (offerId: string) => {
     try {
       setDeletingOfferId(offerId);
-      await axios.delete(`/api/admin/offers/${offerId}`, {
+      await axios.delete(`${API_BASE_URL}/api/admin/offers/${offerId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setOffers((prev) => prev.filter((o) => o._id !== offerId));
       setDeleteConfirmId(null);
+      await fetchOffers();
+      setSuccess("✅ Offer deleted successfully!");
     } catch (err: any) {
-      setOffersError(err.response?.data?.message || "Failed to delete offer.");
+      setOffersError(err.response?.data?.message || "Failed to delete offer");
+      console.error("❌ Error deleting offer:", err);
     } finally {
       setDeletingOfferId(null);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "numeric",
+  // ✅ Format date
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
+      day: "numeric",
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
@@ -248,352 +256,303 @@ const NotificationPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 p-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            📢 Push Notifications
+          <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-orange-600 to-orange-500 bg-clip-text text-transparent mb-2">
+            📢 Notification Center
           </h1>
-          <p className="text-gray-600">Send messages and offers to your users</p>
+          <p className="text-gray-600 text-lg">Send notifications and manage offers for drivers and customers</p>
+          {/* API URL Info (for debugging) */}
+          <p className="text-xs text-gray-500 mt-3 p-2 bg-gray-100 rounded">
+            Backend: <code className="font-mono">{API_BASE_URL}</code>
+          </p>
         </div>
 
-        {/* Success/Error Messages */}
-        {success && (
-          <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 animate-in slide-in-from-top">
-            <div className="flex items-center gap-3">
-              <svg className="w-6 h-6 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-green-800 font-medium">{success}</span>
-            </div>
+        {/* Notification Sender */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden mb-8">
+          <div className="px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-amber-50">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+              <span>✉️</span>
+              Send Notification
+            </h2>
           </div>
-        )}
 
-        {error && (
-          <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-red-50 to-pink-50 border border-red-200 animate-in slide-in-from-top">
-            <div className="flex items-center gap-3">
-              <svg className="w-6 h-6 text-red-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-red-800 font-medium">{error}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Main Form Card */}
-        <form onSubmit={handleSend} className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-          <div className="p-8 space-y-8">
-
-            {/* Mode Selector */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3">
-                Delivery Mode
+          <div className="p-8">
+            {/* Mode Selection */}
+            <div className="flex gap-4 mb-6 flex-col sm:flex-row">
+              <label className="flex items-center cursor-pointer group">
+                <input
+                  type="radio"
+                  value="broadcast"
+                  checked={mode === "broadcast"}
+                  onChange={() => setMode("broadcast")}
+                  className="w-4 h-4 text-orange-600 accent-orange-600"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-700 group-hover:text-orange-600 transition-colors">
+                  📡 Broadcast (All Users)
+                </span>
               </label>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setMode("broadcast")}
-                  className={`p-4 rounded-xl border-2 transition-all ${
-                    mode === "broadcast"
-                      ? "border-blue-500 bg-blue-50 shadow-md"
-                      : "border-gray-200 hover:border-gray-300 bg-white"
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">📣</span>
-                    <span className={`font-semibold ${mode === "broadcast" ? "text-blue-700" : "text-gray-700"}`}>
-                      Broadcast
-                    </span>
-                    <span className="text-xs text-gray-500">Send to multiple users</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMode("individual")}
-                  className={`p-4 rounded-xl border-2 transition-all ${
-                    mode === "individual"
-                      ? "border-purple-500 bg-purple-50 shadow-md"
-                      : "border-gray-200 hover:border-gray-300 bg-white"
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">💬</span>
-                    <span className={`font-semibold ${mode === "individual" ? "text-purple-700" : "text-gray-700"}`}>
-                      Individual
-                    </span>
-                    <span className="text-xs text-gray-500">Send to one user</span>
-                  </div>
-                </button>
-              </div>
+              <label className="flex items-center cursor-pointer group">
+                <input
+                  type="radio"
+                  value="individual"
+                  checked={mode === "individual"}
+                  onChange={() => setMode("individual")}
+                  className="w-4 h-4 text-orange-600 accent-orange-600"
+                />
+                <span className="ml-3 text-sm font-medium text-gray-700 group-hover:text-orange-600 transition-colors">
+                  👤 Individual User
+                </span>
+              </label>
             </div>
 
-            {/* Notification Type Selector */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3">
-                Notification Type
-              </label>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setNotificationType("general")}
-                  className={`p-4 rounded-xl border-2 transition-all ${
-                    notificationType === "general"
-                      ? "border-green-500 bg-green-50 shadow-md"
-                      : "border-gray-200 hover:border-gray-300 bg-white"
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">💬</span>
-                    <span className={`font-semibold ${notificationType === "general" ? "text-green-700" : "text-gray-700"}`}>
-                      General Message
-                    </span>
-                    <span className="text-xs text-gray-500">Normal notifications</span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setNotificationType("promotion")}
-                  className={`p-4 rounded-xl border-2 transition-all ${
-                    notificationType === "promotion"
-                      ? "border-orange-500 bg-orange-50 shadow-md"
-                      : "border-gray-200 hover:border-gray-300 bg-white"
-                  }`}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="text-2xl">🎁</span>
-                    <span className={`font-semibold ${notificationType === "promotion" ? "text-orange-700" : "text-gray-700"}`}>
-                      Offer / Promotion
-                    </span>
-                    <span className="text-xs text-gray-500">Shows in Offers tab</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Title Input */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Title *
-              </label>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Enter notification title"
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all bg-white"
-                required
-              />
-            </div>
-
-            {/* Body Input */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Message *
-              </label>
-              <textarea
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="Enter notification message"
-                rows={4}
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none bg-white"
-                required
-              />
-            </div>
-
-            {/* Image Upload */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Image (Optional)
-              </label>
-              {imagePreview ? (
-                <div className="relative group">
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="w-full h-64 object-cover rounded-xl border-2 border-gray-200"
-                  />
-                  <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all rounded-xl" />
-                  <button
-                    type="button"
-                    onClick={removeImage}
-                    className="absolute top-3 right-3 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-all shadow-lg hover:scale-110"
-                    title="Remove image"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                  </button>
+            {/* Form */}
+            <form onSubmit={handleSend} className="space-y-6">
+              {/* Success Message */}
+              {success && (
+                <div className="p-4 rounded-xl bg-green-50 border border-green-200 text-green-700 text-sm font-medium flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {success}
                 </div>
-              ) : (
-                <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-all group">
-                  <div className="flex flex-col items-center justify-center py-6">
-                    {uploadingImage ? (
-                      <>
-                        <svg className="animate-spin h-10 w-10 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <p className="text-sm text-gray-600 font-medium">Uploading...</p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="p-4 bg-gradient-to-br from-blue-100 to-purple-100 rounded-full mb-4 group-hover:scale-110 transition-transform">
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                          </svg>
-                        </div>
-                        <p className="text-base font-semibold text-gray-700 mb-1">Click to upload image</p>
-                        <p className="text-sm text-gray-500">PNG, JPG, GIF up to 5MB</p>
-                      </>
-                    )}
-                  </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    className="hidden"
-                    disabled={uploadingImage || loading}
-                  />
-                </label>
               )}
-            </div>
 
-            {/* Broadcast Options */}
-            {mode === "broadcast" && (
+              {/* Error Message */}
+              {error && (
+                <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm font-medium flex items-center gap-2">
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {error}
+                </div>
+              )}
+
+              {/* Individual User Selection */}
+              {mode === "individual" && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                    Select User <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <select
+                      value={selectedUser}
+                      onChange={(e) => setSelectedUser(e.target.value)}
+                      className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    >
+                      <option value="">-- Select a driver --</option>
+                      {drivers.map((driver) => (
+                        <option key={driver._id} value={driver._id}>
+                          🚗 {driver.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={selectedUser}
+                      onChange={(e) => setSelectedUser(e.target.value)}
+                      className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                    >
+                      <option value="">-- Select a customer --</option>
+                      {customers.map((customer) => (
+                        <option key={customer._id} value={customer._id}>
+                          🛒 {customer.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Broadcast Options */}
+              {mode === "broadcast" && (
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-3">
+                    Send To <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {[
+                      { value: "all", label: "👥 All Users", desc: "Both drivers & customers" },
+                      { value: "driver", label: "🚗 Drivers Only", desc: "Only drivers" },
+                      { value: "customer", label: "🛒 Customers Only", desc: "Only customers" },
+                    ].map((option) => (
+                      <label key={option.value} className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:border-orange-300 hover:bg-orange-50 transition-all">
+                        <input
+                          type="radio"
+                          name="role"
+                          value={option.value}
+                          checked={role === (option.value as "driver" | "customer" | "all")}
+                          onChange={(e) => setRole(e.target.value as "driver" | "customer" | "all")}
+                          className="w-4 h-4 text-orange-600 accent-orange-600"
+                        />
+                        <div>
+                          <div className="font-medium text-gray-700">{option.label}</div>
+                          <div className="text-xs text-gray-500">{option.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Notification Type */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-3">
-                  Send To
+                  Notification Type <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
-                    { value: "all", label: "All Users", emoji: "👥", color: "blue" },
-                    { value: "driver", label: "Drivers", emoji: "🚗", color: "green" },
-                    { value: "customer", label: "Customers", emoji: "🛒", color: "orange" },
-                  ].map(({ value, label, emoji, color }) => (
-                    <button
-                      key={value}
-                      type="button"
-                      onClick={() => setRole(value as any)}
-                      className={`p-4 rounded-xl border-2 transition-all ${
-                        role === value
-                          ? `border-${color}-500 bg-${color}-50 shadow-md`
-                          : "border-gray-200 hover:border-gray-300 bg-white"
-                      }`}
-                    >
-                      <div className="flex flex-col items-center gap-2">
-                        <span className="text-2xl">{emoji}</span>
-                        <span className={`text-sm font-semibold ${role === value ? `text-${color}-700` : "text-gray-700"}`}>
-                          {label}
-                        </span>
+                    { value: "general", label: "💬 General", desc: "Regular message" },
+                    { value: "promotion", label: "🎁 Promotion/Offer", desc: "Show in offers tab" },
+                  ].map((option) => (
+                    <label key={option.value} className="flex items-center gap-3 p-3 border border-gray-200 rounded-xl cursor-pointer hover:border-orange-300 hover:bg-orange-50 transition-all">
+                      <input
+                        type="radio"
+                        name="type"
+                        value={option.value}
+                        checked={notificationType === (option.value as "general" | "promotion")}
+                        onChange={(e) => setNotificationType(e.target.value as "general" | "promotion")}
+                        className="w-4 h-4 text-orange-600 accent-orange-600"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-700">{option.label}</div>
+                        <div className="text-xs text-gray-500">{option.desc}</div>
                       </div>
-                    </button>
+                    </label>
                   ))}
                 </div>
               </div>
-            )}
 
-            {/* Individual Options */}
-            {mode === "individual" && (
+              {/* Title Input */}
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Select User *
+                  Title <span className="text-red-500">*</span>
                 </label>
-                <select
-                  value={selectedUser}
-                  onChange={(e) => setSelectedUser(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none bg-white transition-all"
-                  required
-                >
-                  <option value="">-- Select a user --</option>
-                  <optgroup label="🚗 Drivers">
-                    {drivers.map((d) => (
-                      <option key={d._id} value={d._id}>
-                        {d.name} {d.phone ? `(${d.phone})` : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="🛒 Customers">
-                    {customers.map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.name} {c.phone ? `(${c.phone})` : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g., Special Discount Available"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                />
               </div>
-            )}
-          </div>
 
-          {/* Submit Button */}
-          <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-8 py-6 border-t border-gray-200">
-            <button
-              type="submit"
-              disabled={loading || uploadingImage}
-              className={`w-full px-6 py-4 rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-3 text-lg ${
-                loading || uploadingImage
-                  ? "bg-gray-400 cursor-not-allowed"
-                  : "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg hover:shadow-xl hover:scale-[1.02]"
-              }`}
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  {uploadingImage ? "Uploading Image..." : "Sending..."}
-                </>
-              ) : (
-                <>
-                  {mode === "broadcast" ? (
-                    <><span>🚀</span><span>Send {notificationType === "promotion" ? "Offer" : "Broadcast"}</span></>
-                  ) : (
-                    <><span>💬</span><span>Send {notificationType === "promotion" ? "Offer" : "Message"}</span></>
-                  )}
-                  {imageFile && <span className="text-sm opacity-90">(with image)</span>}
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-
-        {/* ============================================
-            🎁 MANAGE EXISTING OFFERS / PROMOTIONS
-        ============================================ */}
-        <div className="mt-10 bg-white rounded-2xl shadow-xl border border-orange-100 overflow-hidden">
-          {/* Section Header */}
-          <div className="flex items-center justify-between px-8 py-5 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">🎁</span>
+              {/* Message Input */}
               <div>
-                <h2 className="text-xl font-bold text-orange-900">Manage Offers & Promotions</h2>
-                <p className="text-sm text-orange-600">
-                  {offers.length > 0
-                    ? `${offers.length} offer${offers.length !== 1 ? "s" : ""} currently active`
-                    : "No offers sent yet"}
-                </p>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Message <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder="Type your message here..."
+                  rows={4}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+                />
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={fetchOffers}
-              disabled={offersLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-orange-200 text-orange-700 text-sm font-medium hover:bg-orange-50 hover:border-orange-300 transition-all shadow-sm"
-            >
-              <svg
-                className={`w-4 h-4 ${offersLoading ? "animate-spin" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
+
+              {/* Image Upload */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-3">
+                  Attach Image (Optional)
+                </label>
+                {!imageFile ? (
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-orange-300 rounded-xl p-8 text-center cursor-pointer hover:bg-orange-50 transition-colors"
+                  >
+                    <svg className="mx-auto h-12 w-12 text-orange-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <p className="font-medium text-gray-700">Click to upload an image</p>
+                    <p className="text-xs text-gray-500 mt-1">PNG, JPG, GIF • Max 5MB • Recommended 1024x512px</p>
+                  </div>
+                ) : (
+                  <div className="bg-gradient-to-b from-gray-50 to-white border border-gray-200 rounded-xl p-4">
+                    <div className="flex gap-4">
+                      <img
+                        src={imagePreview}
+                        alt="Preview"
+                        className="w-24 h-24 object-cover rounded-lg border border-gray-200"
+                      />
+                      <div className="flex-1 flex flex-col justify-between">
+                        <div>
+                          <p className="font-medium text-gray-700 truncate">{imageFile.name}</p>
+                          <p className="text-sm text-gray-500">{(imageFile.size / 1024).toFixed(2)} KB</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={removeImage}
+                          className="self-start px-3 py-1.5 rounded-lg bg-red-100 text-red-700 text-sm font-medium hover:bg-red-200 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Send Button */}
+              <button
+                type="submit"
+                disabled={loading || uploadingImage}
+                className="w-full py-3 bg-gradient-to-r from-orange-600 to-orange-500 text-white font-bold rounded-xl hover:shadow-lg hover:from-orange-700 hover:to-orange-600 transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              Refresh
-            </button>
+                {loading || uploadingImage ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {uploadingImage ? "Uploading image..." : "Sending..."}
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                    Send Notification
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        {/* Offers Management Section */}
+        <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+          <div className="px-8 py-6 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-amber-50 flex items-center justify-between">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-3">
+              <span>🎁</span>
+              Active Offers
+            </h2>
+            <div>
+              <button
+                type="button"
+                onClick={fetchOffers}
+                disabled={offersLoading}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-orange-200 text-orange-700 text-sm font-medium hover:bg-orange-50 hover:border-orange-300 transition-all shadow-sm"
+              >
+                <svg
+                  className={`w-4 h-4 ${offersLoading ? "animate-spin" : ""}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+              </button>
+            </div>
           </div>
 
           {/* Offers Error */}
@@ -729,11 +688,19 @@ const NotificationPage: React.FC = () => {
         <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl border border-blue-100">
           <h3 className="font-bold text-blue-900 mb-4 flex items-center gap-2">
             <span>💡</span>
-            <span>Quick Tips</span>
+            <span>Quick Tips & Configuration</span>
           </h3>
           <ul className="space-y-2 text-sm text-blue-800">
             <li className="flex items-start gap-2">
               <span className="text-blue-600 mt-0.5">•</span>
+              <span><strong>Backend URL:</strong> Uses <code className="bg-blue-100 px-2 py-0.5 rounded">VITE_API_URL</code> environment variable (already set in Render) or defaults to <code className="bg-blue-100 px-2 py-0.5 rounded">http://localhost:5000</code></span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-600 mt-0.5">•</span>
+              <span><strong>Current Backend:</strong> <code className="bg-blue-100 px-2 py-0.5 rounded">{API_BASE_URL}</code></span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-orange-600 mt-0.5">•</span>
               <span><strong>General Messages:</strong> Appear in Messages tab only</span>
             </li>
             <li className="flex items-start gap-2">
