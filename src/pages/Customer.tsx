@@ -105,14 +105,40 @@ const CustomersPage: React.FC = () => {
       if (showRefreshIndicator) setIsRefreshing(true);
       else setLoading(true);
 
-      const res = await axios.get("/api/admin/customers", {
-        headers: { Authorization: `Bearer ${token}` },
+      const API_BASE = (import.meta as any).env?.VITE_API_URL
+        ? (import.meta as any).env.VITE_API_URL.replace(/\/api\/?$/, "").replace(/\/$/, "")
+        : "";
+
+      const res = await axios.get(`${API_BASE}/api/admin/customers`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
       });
-      setCustomers(res.data.customers || []);
+
+      console.log("📦 Customers API raw response:", res.data);
+
+      const d = res.data;
+      const list: Customer[] =
+        Array.isArray(d)             ? d
+        : Array.isArray(d.customers) ? d.customers
+        : Array.isArray(d.users)     ? d.users
+        : Array.isArray(d.data)      ? d.data
+        : Array.isArray(d.result)    ? d.result
+        : Array.isArray(d.results)   ? d.results
+        : [];
+
+      console.log(`✅ Parsed ${list.length} customers from key:`, Object.keys(d));
+      setCustomers(list);
       setLastRefreshed(new Date());
       setError("");
     } catch (err: any) {
-      setError(err.response?.data?.message || "Failed to load customers.");
+      console.error("❌ fetchCustomers error:", err);
+      setError(
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        `Failed to load customers (${err.response?.status ?? "network error"})`
+      );
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -123,13 +149,27 @@ const CustomersPage: React.FC = () => {
   const fetchCustomerTrips = async (customerId: string) => {
     try {
       setTripLoading(true);
-      const res = await axios.get(`/api/admin/customers/${customerId}/trips`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const API_BASE = (import.meta as any).env?.VITE_API_URL
+        ? (import.meta as any).env.VITE_API_URL.replace(/\/api\/?$/, "").replace(/\/$/, "")
+        : "";
+      const res = await axios.get(`${API_BASE}/api/admin/customers/${customerId}/trips`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
       });
-      const data = res.data;
-      setTrips(data.trips || data.rideHistory || data || []);
+      console.log("📦 Trips API raw response:", res.data);
+      const d = res.data;
+      const list: Trip[] =
+        Array.isArray(d)             ? d
+        : Array.isArray(d.trips)     ? d.trips
+        : Array.isArray(d.rideHistory) ? d.rideHistory
+        : Array.isArray(d.rides)     ? d.rides
+        : Array.isArray(d.data)      ? d.data
+        : [];
+      setTrips(list);
     } catch (err: any) {
-      console.error("Error fetching trips", err);
+      console.error("❌ Error fetching trips:", err);
       setTrips([]);
     } finally {
       setTripLoading(false);
