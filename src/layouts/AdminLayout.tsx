@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Car, Users, CreditCard, Map, Shield, Package,
   Star, Monitor, UserCog, Zap, Search, BarChart3, Scale,
   DollarSign, ChevronDown, ChevronRight, LogOut, Menu, X,
+  Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
 } from "lucide-react";
 import { C } from "../components/ui";
 
@@ -24,51 +25,58 @@ const GROUPS: NavGroup[] = [
     key: "overview",
     label: "Overview",
     items: [
-      { path: "/analytics",   label: "Analytics",    icon: <LayoutDashboard size={16} /> },
-      { path: "/money-flow",  label: "Money Flow",   icon: <DollarSign size={16} /> },
+      { path: "/analytics",  label: "Analytics",   icon: <LayoutDashboard size={16} /> },
+      { path: "/money-flow", label: "Money Flow",   icon: <DollarSign size={16} /> },
     ],
   },
   {
     key: "ops",
     label: "Operations",
     items: [
-      { path: "/rides",   label: "Ride Management",  icon: <Car size={16} />    },
-      { path: "/drivers", label: "Driver Management",icon: <UserCog size={16} /> },
-      { path: "/parcels", label: "Parcel Delivery",  icon: <Package size={16} /> },
-      { path: "/gps",     label: "GPS Monitoring",   icon: <Map size={16} />    },
+      { path: "/rides",    label: "Ride Management",    icon: <Car size={16} />     },
+      { path: "/drivers",  label: "Driver Management",  icon: <UserCog size={16} /> },
+      { path: "/earnings", label: "Driver Earnings",    icon: <TrendingUp size={16} /> },
+      { path: "/parcels",  label: "Parcel Delivery",    icon: <Package size={16} /> },
+      { path: "/gps",      label: "GPS Monitoring",     icon: <Map size={16} />     },
+      { path: "/service-areas", label: "Service Areas", icon: <MapPin size={16} />  },
     ],
   },
   {
     key: "users",
     label: "Users",
     items: [
-      { path: "/customers", label: "User Accounts", icon: <Users size={16} /> },
-      { path: "/ratings",   label: "Ratings",       icon: <Star size={16} />  },
+      { path: "/customers", label: "User Accounts",  icon: <Users size={16} /> },
+      { path: "/ratings",   label: "Ratings",        icon: <Star size={16} />  },
     ],
   },
   {
     key: "finance",
     label: "Finance",
     items: [
-      { path: "/payments",     label: "Payments & Refunds", icon: <CreditCard size={16} /> },
-      { path: "/fare-management", label: "Fare Rates",     icon: <Zap size={16} />        },
-      { path: "/fare-pricing", label: "Promo Codes",       icon: <DollarSign size={16} /> },
+      { path: "/payments",        label: "Payments & Refunds", icon: <CreditCard size={16} />  },
+      { path: "/fare-management", label: "Fare Management",    icon: <Receipt size={16} />     },
+      { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={16} />         },
+      { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={16} />     },
+      { path: "/incentives",      label: "Incentives",         icon: <Gift size={16} />        },
     ],
   },
   {
     key: "safety",
     label: "Safety & Trust",
     items: [
-      { path: "/safety", label: "Complaints",       icon: <Shield size={16} />  },
-      { path: "/fraud",  label: "Fraud Detection",  icon: <Search size={16} />  },
+      { path: "/safety",  label: "Complaints",      icon: <Shield size={16} /> },
+      { path: "/support", label: "Admin Support",   icon: <HelpCircle size={16} /> },
+      { path: "/fraud",   label: "Fraud Detection", icon: <Search size={16} />  },
     ],
   },
   {
     key: "system",
     label: "System",
     items: [
-      { path: "/tech",  label: "Tech Monitoring",   icon: <Monitor size={16} /> },
-      { path: "/legal", label: "Legal & Compliance",icon: <Scale size={16} />   },
+      { path: "/tech",          label: "Tech Monitoring",    icon: <Monitor size={16} />    },
+      { path: "/legal",         label: "Legal & Compliance", icon: <Scale size={16} />      },
+      { path: "/notifications", label: "Notifications",      icon: <Bell size={16} />       },
+      { path: "/help",          label: "Help Management",    icon: <HelpCircle size={16} /> },
     ],
   },
 ];
@@ -76,8 +84,8 @@ const GROUPS: NavGroup[] = [
 export default function AdminLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const [open, setOpen]       = useState<Record<string, boolean>>(Object.fromEntries(GROUPS.map(g => [g.key, true])));
-  const [collapsed, setCol]   = useState(false);
+  const [open, setOpen]     = useState<Record<string, boolean>>(Object.fromEntries(GROUPS.map(g => [g.key, true])));
+  const [collapsed, setCol] = useState(false);
 
   const toggle = (key: string) => setOpen(v => ({ ...v, [key]: !v[key] }));
 

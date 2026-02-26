@@ -3,16 +3,15 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 
-// ✅ API Base URL - Use proxy in development, direct in production
 const API_BASE = import.meta.env.DEV ? "" : "https://ghumobackend.onrender.com";
 
 export default function Login() {
-  const [email, setEmail] = useState("");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const { login } = useAuth();
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
+  const navigate                = useNavigate();
+  const { login }               = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,107 +19,172 @@ export default function Login() {
     setLoading(true);
 
     try {
-      console.log("🔐 Attempting admin login...");
-      console.log("📍 API endpoint:", `${API_BASE}/api/admin/login`);
-      
       const res = await axios.post(
         `${API_BASE}/api/admin/login`,
         { email, password },
-        {
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        }
+        { headers: { "Content-Type": "application/json" } }
       );
 
-      console.log("📦 Login response:", res.data);
-
-      if (res.data && res.data.token) {
-        const token = res.data.token;
-        
-        console.log("🔑 Token received from server");
-        console.log("   Preview:", token.substring(0, 30) + "...");
-        
-        // Save token using AuthContext
-        login(token);
-        
-        // Navigate to dashboard
-        setTimeout(() => {
-          const savedToken = localStorage.getItem("adminToken");
-          if (savedToken) {
-            console.log("✅ SUCCESS: Token properly saved");
-            navigate("/dashboard");
-          } else {
-            setError("Authentication error. Please try again.");
-          }
-        }, 100);
-      } else {
+      const token = res.data?.token;
+      if (!token) {
         setError("Invalid response from server.");
+        return;
       }
+
+      login(token);                                // ✅ saves + validates via AuthContext
+      navigate("/analytics", { replace: true });   // ✅ fixed: was /dashboard (didn't exist)
     } catch (err: any) {
-      console.error("❌ Login error:", err);
-      
-      if (err.response?.status === 401) {
+      if (err.response?.status === 401)
         setError("Invalid email or password.");
-      } else if (err.code === 'ERR_NETWORK') {
+      else if (err.code === "ERR_NETWORK")
         setError("Cannot connect to server. Please check your connection.");
-      } else if (err.message?.includes('CORS')) {
-        setError("CORS error. Backend needs to allow cross-origin requests.");
-      } else {
-        setError(err.response?.data?.message || "Login failed. Please try again.");
-      }
+      else
+        setError(err.response?.data?.message ?? "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50">
-      <div className="bg-white p-8 rounded-xl shadow-lg w-96">
-        <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">🔐 Admin Login</h1>
-          <p className="text-sm text-gray-600 mt-1">Sign in to access admin panel</p>
+    <div style={{
+      minHeight: "100vh",
+      background: "#080a0f",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Syne','Segoe UI',sans-serif",
+      padding: "1rem",
+    }}>
+      <style>{`
+        @keyframes fadeIn { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:none; } }
+        .lcard { animation: fadeIn 0.32s ease; }
+        input:-webkit-autofill {
+          -webkit-box-shadow: 0 0 0 100px #13161e inset !important;
+          -webkit-text-fill-color: #f1f5f9 !important;
+        }
+        .linput { transition: border-color 0.15s, box-shadow 0.15s; }
+        .linput:focus {
+          outline: none;
+          border-color: #6366f1 !important;
+          box-shadow: 0 0 0 3px rgba(99,102,241,0.18) !important;
+        }
+        .lbtn { transition: opacity 0.15s, transform 0.1s; }
+        .lbtn:hover:not(:disabled) { opacity: 0.88; }
+        .lbtn:active:not(:disabled) { transform: scale(0.98); }
+        .lbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+      `}</style>
+
+      <div className="lcard" style={{
+        width: "100%",
+        maxWidth: 400,
+        background: "#0e1015",
+        border: "1px solid #1e2330",
+        borderRadius: 20,
+        padding: "2.5rem 2rem",
+        boxShadow: "0 24px 64px rgba(0,0,0,0.55)",
+      }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: "2rem" }}>
+          <div style={{ fontSize: "2.5rem", marginBottom: 8 }}>🚘</div>
+          <div style={{ fontWeight: 900, fontSize: "1.4rem", color: "#f1f5f9", letterSpacing: "-0.03em" }}>
+            GoIndia
+          </div>
+          <div style={{ fontSize: "0.62rem", fontFamily: "monospace", color: "#374151", letterSpacing: "0.2em", textTransform: "uppercase", marginTop: 4 }}>
+            Admin Panel
+          </div>
         </div>
 
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+          {/* Email */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label style={{ display: "block", fontSize: "0.7rem", color: "#64748b", marginBottom: 6, fontFamily: "monospace", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Email
+            </label>
             <input
+              className="linput"
               type="email"
-              placeholder="admin@example.com"
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               value={email}
               onChange={e => setEmail(e.target.value)}
+              placeholder="admin@goindia.com"
               required
+              autoComplete="username"
+              style={{
+                width: "100%",
+                background: "#13161e",
+                border: "1px solid #1e2330",
+                borderRadius: 10,
+                padding: "0.75rem 1rem",
+                color: "#f1f5f9",
+                fontSize: "0.9rem",
+                boxSizing: "border-box",
+              }}
             />
           </div>
 
+          {/* Password */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <label style={{ display: "block", fontSize: "0.7rem", color: "#64748b", marginBottom: 6, fontFamily: "monospace", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Password
+            </label>
             <input
+              className="linput"
               type="password"
-              placeholder="Enter password"
-              className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               value={password}
               onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
               required
+              autoComplete="current-password"
+              style={{
+                width: "100%",
+                background: "#13161e",
+                border: "1px solid #1e2330",
+                borderRadius: 10,
+                padding: "0.75rem 1rem",
+                color: "#f1f5f9",
+                fontSize: "0.9rem",
+                boxSizing: "border-box",
+              }}
             />
           </div>
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              background: "rgba(239,68,68,0.1)",
+              border: "1px solid rgba(239,68,68,0.25)",
+              borderRadius: 10,
+              padding: "0.65rem 1rem",
+              color: "#f87171",
+              fontSize: "0.82rem",
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2.5 rounded-lg hover:bg-blue-700 disabled:opacity-60 font-medium"
             disabled={loading}
+            className="lbtn"
+            style={{
+              marginTop: 4,
+              background: "linear-gradient(135deg, #6366f1, #4f46e5)",
+              border: "none",
+              borderRadius: 12,
+              padding: "0.875rem",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: "0.95rem",
+              cursor: "pointer",
+              fontFamily: "'Syne','Segoe UI',sans-serif",
+            }}
           >
-            {loading ? "Logging in..." : "Login"}
+            {loading ? "Signing in…" : "Sign In →"}
           </button>
         </form>
+
+        <div style={{ marginTop: "1.5rem", textAlign: "center", fontSize: "0.68rem", color: "#1f2937", fontFamily: "monospace" }}>
+          GoIndia Admin · Restricted Access
+        </div>
       </div>
     </div>
   );
