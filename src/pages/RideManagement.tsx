@@ -128,21 +128,46 @@ function RideMap({ trip, height = 220 }: RideMapProps) {
           icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
         });
 
-        // Route line
-        new G.Polyline({
-          path: [pickup, drop],
-          geodesic: true,
-          strokeColor: "#6366f1",
-          strokeOpacity: 0.7,
-          strokeWeight: 3,
-          map,
+        // Use Directions API to show actual route
+        const directionsService = new G.DirectionsService();
+        const directionsDisplay = new G.DirectionsRenderer({
+          map: map,
+          polylineOptions: {
+            strokeColor: "#6366f1",
+            strokeOpacity: 0.8,
+            strokeWeight: 4,
+          },
+          suppressMarkers: true, // Hide default markers to use our custom ones
         });
 
-        // Fit both points
-        const bounds = new G.LatLngBounds();
-        bounds.extend(pickup);
-        bounds.extend(drop);
-        map.fitBounds(bounds, 48);
+        directionsService.route(
+          {
+            origin: pickup,
+            destination: drop,
+            travelMode: G.TravelMode.DRIVING,
+          },
+          (result: any, status: any) => {
+            if (status === G.DirectionsStatus.OK) {
+              directionsDisplay.setDirections(result);
+            } else {
+              // Fallback to straight line if directions API fails
+              new G.Polyline({
+                path: [pickup, drop],
+                geodesic: true,
+                strokeColor: "#6366f1",
+                strokeOpacity: 0.7,
+                strokeWeight: 3,
+                map,
+              });
+            }
+
+            // Fit both points
+            const bounds = new G.LatLngBounds();
+            bounds.extend(pickup);
+            bounds.extend(drop);
+            map.fitBounds(bounds, 48);
+          }
+        );
       }
     } catch (e) {
       console.warn("Map init error:", e);
