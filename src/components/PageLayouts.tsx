@@ -238,7 +238,10 @@ export const DataTable: React.FC<{
         </thead>
         <tbody>
           {rows.map((row, idx) => (
-            <tr key={idx} style={{ borderBottom: `1px solid ${DS.border}`, _hover: { backgroundColor: DS.surface } }}>
+            <tr key={idx} style={{ borderBottom: `1px solid ${DS.border}` }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = DS.surface)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
               {columns.map((col) => (
                 <td key={col.key} style={{ padding: '1rem 1.5rem', color: DS.text, fontSize: '0.938rem' }}>
                   {row[col.key]}
