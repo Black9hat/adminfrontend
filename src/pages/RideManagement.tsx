@@ -1,464 +1,506 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { RefreshCw, UserCheck, XCircle, RotateCcw, MapPin } from "lucide-react";
+import {
+  RefreshCw, UserCheck, XCircle, MapPin, Clock,
+  TrendingUp, AlertTriangle, CheckCircle2, Navigation,
+} from "lucide-react";
 import { useTrips, useDrivers, useMutation } from "../hooks/index";
 import type { Trip } from "../types/index";
 import {
-  Badge, Btn, Card, Table, TR, TD, Modal, Spinner, PageError, Empty,
-  PageHeader, SearchBar, Sel, Tabs, Timeline, InfoRow, SectionLabel,
-  ConfirmDialog, C, Pagination,
+  Badge, Btn, Card, Table, TR, TD, Modal, Spinner, PageError,
+  SearchBar, Sel, Tabs, Timeline, InfoRow, SectionLabel,
+  ConfirmDialog, C, Pagination, StatCard, LiveDot,
 } from "../components/ui";
 import { toast } from "react-toastify";
 
 const PER = 20;
-const STATUS_OPTS = [
-  { value: "all",             label: "All Status"  },
-  { value: "requested",       label: "Requested"   },
-  { value: "driver_assigned", label: "Assigned"    },
-  { value: "ride_started",    label: "In Progress" },
-  { value: "completed",       label: "Completed"   },
-  { value: "cancelled",       label: "Cancelled"   },
+const VI: Record<string, string> = { bike:"🏍️", auto:"🛺", car:"🚗", premium:"🚙", xl:"🚐" };
+
+const STATUS_TABS = [
+  { value:"all",             label:"All"         },
+  { value:"requested",       label:"Requested"   },
+  { value:"driver_assigned", label:"Assigned"    },
+  { value:"ride_started",    label:"En Route"    },
+  { value:"completed",       label:"Completed"   },
+  { value:"cancelled",       label:"Cancelled"   },
 ];
 const TYPE_OPTS = [
-  { value: "all",    label: "All Types"    },
-  { value: "short",  label: "🏙️ City Ride" },
-  { value: "long",   label: "🛣️ Long Route" },
-  { value: "parcel", label: "📦 Parcel"    },
+  { value:"all",    label:"All Types"    },
+  { value:"short",  label:"🏙️ City"     },
+  { value:"long",   label:"🛣️ Outstation" },
+  { value:"parcel", label:"📦 Parcel"    },
 ];
-const VI: Record<string, string> = { bike: "🏍️", auto: "🛺", car: "🚗", premium: "🚙", xl: "🚐" };
 
-// ── Google Maps script loader (shared singleton) ──────────────────────────────
+// ── Maps ──────────────────────────────────────────────────────────────────────
 const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY ?? "";
-let _scriptState: "idle" | "loading" | "ready" = (window as any).google?.maps ? "ready" : "idle";
-const _cbs: Array<() => void> = [];
-
-function loadGoogleMapsScript(cb: () => void) {
+let _ms: "idle"|"loading"|"ready" = (window as any).google?.maps ? "ready" : "idle";
+const _mq: Array<()=>void> = [];
+function loadMaps(cb:()=>void) {
   if (!MAPS_KEY) return;
-  if (_scriptState === "ready") { cb(); return; }
-  _cbs.push(cb);
-  if (_scriptState === "loading") return;
-  _scriptState = "loading";
-  const s = document.createElement("script");
-  s.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=geometry,directions`;
-  s.async = true;
-  s.defer = true;
-  s.onload = () => {
-    _scriptState = "ready";
-    _cbs.forEach(fn => fn());
-    _cbs.length = 0;
-  };
+  if (_ms==="ready") { cb(); return; }
+  _mq.push(cb);
+  if (_ms==="loading") return;
+  _ms="loading";
+  const s=document.createElement("script");
+  s.src=`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=geometry,directions`;
+  s.async=true;
+  s.onload=()=>{ _ms="ready"; _mq.forEach(f=>f()); _mq.length=0; };
   document.head.appendChild(s);
 }
-
-// ── Dark map style ────────────────────────────────────────────────────────────
-const DARK_STYLE = [
-  { elementType: "geometry",           stylers: [{ color: "#0e1015" }] },
-  { elementType: "labels.text.fill",   stylers: [{ color: "#6b7280" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#0e1015" }] },
-  { featureType: "road",  elementType: "geometry",          stylers: [{ color: "#1e2330" }] },
-  { featureType: "road",  elementType: "geometry.stroke",   stylers: [{ color: "#13161e" }] },
-  { featureType: "road",  elementType: "labels.text.fill",  stylers: [{ color: "#4a5568" }] },
-  { featureType: "water", elementType: "geometry",          stylers: [{ color: "#080a0f" }] },
-  { featureType: "poi",        stylers: [{ visibility: "off" }] },
-  { featureType: "transit",    stylers: [{ visibility: "off" }] },
-  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#1e2330" }] },
+const DARK_MAP=[
+  {elementType:"geometry",stylers:[{color:"#0f1117"}]},
+  {elementType:"labels.text.fill",stylers:[{color:"#525e7a"}]},
+  {elementType:"labels.text.stroke",stylers:[{color:"#0f1117"}]},
+  {featureType:"road",elementType:"geometry",stylers:[{color:"#1a1f2e"}]},
+  {featureType:"road",elementType:"geometry.stroke",stylers:[{color:"#12151c"}]},
+  {featureType:"road",elementType:"labels.text.fill",stylers:[{color:"#3a4560"}]},
+  {featureType:"water",elementType:"geometry",stylers:[{color:"#060810"}]},
+  {featureType:"poi",stylers:[{visibility:"off"}]},
+  {featureType:"transit",stylers:[{visibility:"off"}]},
+  {featureType:"administrative",elementType:"geometry",stylers:[{color:"#1a1f2e"}]},
 ];
-
-// ── Coord helper ──────────────────────────────────────────────────────────────
-// MongoDB stores coordinates as [longitude, latitude] (GeoJSON order).
-// The admin API returns the raw document, so:
-//   trip.pickup.coordinates = [lng, lat]
-//   trip.drop.coordinates   = [lng, lat]
-function toLatLng(loc?: Trip["pickup"]): { lat: number; lng: number } | null {
-  if (!loc) return null;
-  const c = loc.coordinates;
-  if (c && c.length === 2) return { lat: c[1], lng: c[0] };  // [lng, lat] → {lat, lng}
+function toLatLng(loc?:Trip["pickup"]):{lat:number;lng:number}|null {
+  const c=loc?.coordinates;
+  if (c?.length===2) return {lat:c[1],lng:c[0]};
   return null;
 }
+function RideMap({trip,height=260}:{trip:Trip;height?:number}) {
+  const ref=useRef<HTMLDivElement>(null);
+  const [rdy,setRdy]=useState(_ms==="ready");
+  useEffect(()=>{ loadMaps(()=>setRdy(true)); },[]);
+  useEffect(()=>{
+    if (!rdy||!ref.current) return;
+    const pickup=toLatLng(trip.pickup); const drop=toLatLng(trip.drop);
+    if (!pickup) return;
+    try {
+      const G=(window as any).google.maps;
+      const map=new G.Map(ref.current,{
+        zoom:13,center:pickup,styles:DARK_MAP,
+        disableDefaultUI:true,zoomControl:false,
+      });
+      const mkOpts=(color:string)=>({
+        path:G.SymbolPath.CIRCLE,scale:8,
+        fillColor:color,fillOpacity:1,
+        strokeColor:"#fff",strokeWeight:2,
+      });
+      new G.Marker({position:pickup,map,title:"Pickup",icon:mkOpts(C.green)});
+      if (drop) {
+        new G.Marker({position:drop,map,title:"Drop",icon:mkOpts(C.red)});
+        const ds=new G.DirectionsService();
+        const dr=new G.DirectionsRenderer({map,suppressMarkers:true,
+          polylineOptions:{strokeColor:C.primary,strokeOpacity:0.9,strokeWeight:4}});
+        ds.route({origin:pickup,destination:drop,travelMode:G.TravelMode.DRIVING},
+          (r:any,s:any)=>{
+            if(s===G.DirectionsStatus.OK) dr.setDirections(r);
+            else new G.Polyline({path:[pickup,drop],geodesic:true,strokeColor:C.primary,strokeWeight:3,map});
+            const b=new G.LatLngBounds();b.extend(pickup);b.extend(drop);map.fitBounds(b,48);
+          });
+      }
+    } catch(e){console.warn(e);}
+  },[rdy,trip]);
 
-// ── RideMap component ─────────────────────────────────────────────────────────
-interface RideMapProps {
-  trip: Trip;
-  height?: number;
+  if (!MAPS_KEY) return (
+    <div style={{
+      height,background:C.surface2,border:"1px solid "+C.border,borderRadius:9,
+      display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,
+    }}>
+      <span style={{fontSize:"1.4rem"}}>🗺️</span>
+      <span style={{color:C.muted,fontSize:"0.71rem",fontFamily:"'JetBrains Mono',monospace"}}>
+        Set VITE_GOOGLE_MAPS_KEY to enable map
+      </span>
+      <div style={{fontSize:"0.69rem",color:C.muted,textAlign:"center",maxWidth:280,marginTop:2}}>
+        📍 {trip.pickup?.address?.slice(0,50)}<br/>
+        🏁 {trip.drop?.address?.slice(0,50)}
+      </div>
+    </div>
+  );
+  return <div ref={ref} style={{width:"100%",height,borderRadius:9,background:C.surface2}}/>;
 }
 
-function RideMap({ trip, height = 220 }: RideMapProps) {
-  const divRef = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(_scriptState === "ready");
-
-  useEffect(() => {
-    if (!MAPS_KEY) return;
-    loadGoogleMapsScript(() => setReady(true));
-  }, []);
-
-  useEffect(() => {
-    if (!ready || !divRef.current) return;
-
-    const pickup = toLatLng(trip.pickup);
-    const drop   = toLatLng(trip.drop);
-
-    if (!pickup) return; // no coordinates — nothing to render
-
-    try {
-      const G   = (window as any).google.maps;
-      const map = new G.Map(divRef.current, {
-        zoom: 13,
-        center: pickup,
-        mapTypeId: "roadmap",
-        styles: DARK_STYLE,
-        disableDefaultUI: true,
-        zoomControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-      });
-
-      // Pickup marker
-      new G.Marker({
-        position: pickup,
-        map,
-        title: "Pickup: " + (trip.pickup?.address ?? ""),
-        icon: "http://maps.google.com/mapfiles/ms/icons/green-dot.png",
-      });
-
-      if (drop) {
-        // Drop marker
-        new G.Marker({
-          position: drop,
-          map,
-          title: "Drop: " + (trip.drop?.address ?? ""),
-          icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
-        });
-
-        // Use Directions API to show actual route
-        const directionsService = new G.DirectionsService();
-        const directionsDisplay = new G.DirectionsRenderer({
-          map: map,
-          polylineOptions: {
-            strokeColor: "#6366f1",
-            strokeOpacity: 0.8,
-            strokeWeight: 4,
-          },
-          suppressMarkers: true, // Hide default markers to use our custom ones
-        });
-
-        directionsService.route(
-          {
-            origin: pickup,
-            destination: drop,
-            travelMode: G.TravelMode.DRIVING,
-          },
-          (result: any, status: any) => {
-            if (status === G.DirectionsStatus.OK) {
-              directionsDisplay.setDirections(result);
-            } else {
-              // Fallback to straight line if directions API fails
-              new G.Polyline({
-                path: [pickup, drop],
-                geodesic: true,
-                strokeColor: "#6366f1",
-                strokeOpacity: 0.7,
-                strokeWeight: 3,
-                map,
-              });
-            }
-
-            // Fit both points
-            const bounds = new G.LatLngBounds();
-            bounds.extend(pickup);
-            bounds.extend(drop);
-            map.fitBounds(bounds, 48);
-          }
-        );
-      }
-    } catch (e) {
-      console.warn("Map init error:", e);
-    }
-  }, [ready, trip]);
-
-  if (!MAPS_KEY) {
-    return (
-      <div style={{
-        height, background: "#0e1015", border: "1px solid #1e2330",
-        borderRadius: 10, display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center", gap: 8,
-      }}>
-        <span style={{ fontSize: "1.5rem" }}>🗺️</span>
-        <span style={{ color: C.muted, fontSize: "0.75rem", fontFamily: "monospace" }}>
-          Add VITE_GOOGLE_MAPS_KEY to .env to enable map
-        </span>
-      </div>
-    );
-  }
-
+// ── Quick stat chip ───────────────────────────────────────────────────────────
+function MetricPill({icon, label, value, color}:{icon:React.ReactNode;label:string;value:string|number;color:string}) {
   return (
-    <div ref={divRef} style={{
-      width: "100%",
-      height: `${height}px`,
-      borderRadius: "10px",
-      background: "#0e1015",
-      border: "1px solid #1e2330",
-    }} />
+    <div style={{
+      display:"flex",alignItems:"center",gap:7,
+      padding:"5px 12px",
+      background:color+"12",
+      border:"1px solid "+color+"22",
+      borderRadius:8,
+    }}>
+      <span style={{color,display:"flex",flexShrink:0}}>{icon}</span>
+      <div>
+        <div style={{fontSize:"0.58rem",color:color+"aa",fontFamily:"'JetBrains Mono',monospace",letterSpacing:"0.1em",textTransform:"uppercase"}}>{label}</div>
+        <div style={{fontSize:"0.9rem",fontWeight:800,color,lineHeight:1,marginTop:1}}>{value}</div>
+      </div>
+    </div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 export default function RideManagement() {
   const { trips, loading, error, refetch } = useTrips();
-  const { drivers } = useDrivers();
-  const { mutate, loading: acting } = useMutation();
+  const { drivers }                        = useDrivers();
+  const { mutate, loading: acting }        = useMutation();
 
-  const [status,     setStatus]   = useState("all");
-  const [type,       setType]     = useState("all");
-  const [q,          setQ]        = useState("");
-  const [page,       setPage]     = useState(1);
-  const [sel,        setSel]      = useState<Trip | null>(null);
-  const [assignOpen, setAO]       = useState(false);
-  const [assignDrvr, setAD]       = useState("");
-  const [cancelOpen, setCO]       = useState(false);
+  const [statusF, setStatusF] = useState("all");
+  const [typeF,   setTypeF]   = useState("all");
+  const [q,       setQ]       = useState("");
+  const [page,    setPage]    = useState(1);
+  const [sel,     setSel]     = useState<Trip|null>(null);
+  const [assignOpen,setAO]    = useState(false);
+  const [assignDrvr,setAD]    = useState("");
+  const [cancelOpen,setCO]    = useState(false);
 
-  const filtered = useMemo(() => {
-    let base = trips;
-    if (status !== "all") base = base.filter(t => t.status === status);
-    if (type   !== "all") base = base.filter(t => t.type === type);
+  // KPIs
+  const active     = useMemo(()=>trips.filter(t=>["requested","driver_assigned","driver_at_pickup","ride_started"].includes(t.status)),[trips]);
+  const todayTrips = useMemo(()=>trips.filter(t=>new Date(t.createdAt).toDateString()===new Date().toDateString()),[trips]);
+  const revenue    = useMemo(()=>trips.filter(t=>t.status==="completed").reduce((s,t)=>s+(t.finalFare??t.fare??0),0),[trips]);
+  const cancelPct  = useMemo(()=>trips.length>0?Math.round(trips.filter(t=>t.status==="cancelled").length/trips.length*100):0,[trips]);
+
+  const statusTabs = STATUS_TABS.map(o=>({
+    ...o, count: o.value==="all" ? trips.length : trips.filter(t=>t.status===o.value).length,
+  }));
+
+  const filtered = useMemo(()=>{
+    let b=trips;
+    if (statusF!=="all") b=b.filter(t=>t.status===statusF);
+    if (typeF!=="all")   b=b.filter(t=>t.type===typeF);
     if (q) {
-      const ql = q.toLowerCase();
-      base = base.filter(t =>
-        [t._id, t.customerId?.name, t.customerId?.phone, t.assignedDriver?.name,
-         t.pickup?.address, t.drop?.address].some(v => v?.toLowerCase?.().includes(ql))
-      );
+      const ql=q.toLowerCase();
+      b=b.filter(t=>[t._id,t.customerId?.name,t.customerId?.phone,
+        t.assignedDriver?.name,t.pickup?.address,t.drop?.address
+      ].some(v=>v?.toLowerCase?.().includes(ql)));
     }
-    return base.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [trips, status, type, q]);
+    return b.sort((a,b)=>+new Date(b.createdAt)-+new Date(a.createdAt));
+  },[trips,statusF,typeF,q]);
 
-  const pages = Math.ceil(filtered.length / PER);
-  const paged = filtered.slice((page - 1) * PER, page * PER);
+  const pages=Math.ceil(filtered.length/PER);
+  const paged=filtered.slice((page-1)*PER,page*PER);
 
-  const doAssign = async () => {
-    if (!sel || !assignDrvr) return;
-    // Uses the route confirmed in your adminRoutes.js: POST /admin/manual-assign
-    const { ok } = await mutate("post", "/admin/manual-assign", { tripId: sel._id, driverId: assignDrvr });
-    if (ok) { toast.success("Driver assigned"); setAO(false); refetch(); }
+  const doAssign=async()=>{
+    if (!sel||!assignDrvr) return;
+    const {ok}=await mutate("post","/admin/manual-assign",{tripId:sel._id,driverId:assignDrvr});
+    if(ok){toast.success("Driver assigned");setAO(false);refetch();}
     else toast.error("Assignment failed");
   };
-
-  const doCancel = async () => {
+  const doCancel=async()=>{
     if (!sel) return;
-    // Uses the route confirmed in your adminRoutes.js: PUT /admin/trip/:tripId/cancel
-    const { ok } = await mutate("put", `/admin/trip/${sel._id}/cancel`, {});
-    if (ok) { toast.success("Trip cancelled"); setCO(false); setSel(null); refetch(); }
-    else toast.error("Cancellation failed");
+    const {ok}=await mutate("put",`/admin/trip/${sel._id}/cancel`,{});
+    if(ok){toast.success("Cancelled");setCO(false);setSel(null);refetch();}
+    else toast.error("Cancel failed");
   };
 
-  if (loading) return <Spinner label="Loading rides…" />;
-  if (error)   return <PageError message={error} onRetry={refetch} />;
+  if (loading) return <Spinner label="Loading rides…"/>;
+  if (error)   return <PageError message={error} onRetry={refetch}/>;
+
+  const fare=(t:Trip)=>t.finalFare??t.fare??0;
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      width: "100%",
-      display: "flex",
-      flexDirection: "column",
-      background: "linear-gradient(135deg, #0f1117 0%, #131820 100%)",
-      fontFamily: "'Syne','Segoe UI',sans-serif",
-      margin: 0,
-      padding: 0,
-    }}>
-      <style>{`
-        * { box-sizing: border-box; }
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
-        ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.4); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.6); }
-      `}</style>
+    <div style={{minHeight:"100vh",background:C.bg,fontFamily:"'Inter',sans-serif"}}>
 
-      {/* Header */}
+      {/* ── TOPBAR ─────────────────────────────────────────────────────────── */}
       <div style={{
-        borderBottom: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(0,0,0,0.3)",
-        padding: "1.5rem 2rem",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        backdropFilter: "blur(10px)",
-        flexShrink: 0,
+        background:C.surface,
+        borderBottom:"1px solid "+C.border,
+        padding:"0 1.75rem",
+        height:56,
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        position:"sticky", top:0, zIndex:50,
+        gap:12,
       }}>
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "6px" }}>
-            <span style={{ fontSize: "1.8rem" }}>🚘</span>
-            <h1 style={{
-              margin: 0, fontSize: "1.75rem", fontWeight: 900,
-              color: "#f1f5f9", letterSpacing: "-0.02em",
-            }}>
-              Ride Management
-            </h1>
+        {/* Title */}
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{
+            width:32,height:32,borderRadius:8,
+            background:C.primaryDim,border:"1px solid "+C.primaryBrd,
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:"1rem",
+          }}>🚘</div>
+          <div>
+            <div style={{fontWeight:700,fontSize:"0.92rem",color:C.text,letterSpacing:"-0.01em"}}>Ride Management</div>
+            <div style={{display:"flex",alignItems:"center",gap:5,marginTop:1}}>
+              <LiveDot/>
+              <span style={{fontSize:"0.67rem",color:C.muted,fontFamily:"'JetBrains Mono',monospace"}}>
+                {active.length} active · {trips.length} total
+              </span>
+            </div>
           </div>
-          <p style={{ margin: 0, fontSize: "0.85rem", color: "#94a3b8" }}>
-            {trips.length} total · {trips.filter(t => t.status === "ride_started").length} active now
-          </p>
         </div>
-        <Btn icon={<RefreshCw size={14} />} variant="ghost" onClick={refetch}>Refresh</Btn>
+
+        {/* Right: metric pills + refresh */}
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{display:"flex",gap:6}}>
+            <MetricPill icon={<CheckCircle2 size={13}/>} label="Today" value={todayTrips.length} color={C.primary}/>
+            <MetricPill icon={<TrendingUp size={13}/>}   label="Revenue" value={"₹"+Math.round(revenue/1000)+"k"} color={C.green}/>
+            <MetricPill icon={<AlertTriangle size={13}/>} label="Cancel" value={cancelPct+"%"} color={C.red}/>
+          </div>
+          <Btn variant="ghost" size="sm" icon={<RefreshCw size={13}/>} onClick={refetch}>Refresh</Btn>
+        </div>
       </div>
 
-      {/* Scrollable content */}
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: "2rem", width: "100%" }}>
+      {/* ── PAGE BODY ──────────────────────────────────────────────────────── */}
+      <div style={{padding:"1.5rem 1.75rem",maxWidth:1700}}>
 
-        {/* Status tabs */}
-        <div style={{ marginBottom: "1.5rem" }}>
-          <Tabs tabs={STATUS_OPTS} active={status} onChange={s => { setStatus(s); setPage(1); }} />
+        {/* KPI cards */}
+        <div style={{
+          display:"grid",
+          gridTemplateColumns:"repeat(auto-fit,minmax(148px,1fr))",
+          gap:"0.75rem", marginBottom:"1.25rem",
+        }}>
+          <StatCard label="Total Rides"   value={trips.length}   icon="🚘" color={C.primary}/>
+          <StatCard label="Active Now"    value={active.length}  icon="🟢" color={C.green}  sub="in progress"/>
+          <StatCard label="Today Rides"   value={todayTrips.length} icon="📅" color={C.cyan}/>
+          <StatCard label="Total Revenue" value={"₹"+Math.round(revenue/1000)+"k"} icon="💰" color={C.amber}/>
+          <StatCard label="Cancel Rate"   value={cancelPct+"%"}  icon="❌" color={C.red}/>
         </div>
 
-        {/* Filters */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: "1.5rem", alignItems: "center" }}>
-          <SearchBar
-            value={q}
-            onChange={v => { setQ(v); setPage(1); }}
-            placeholder="Search trip ID, customer, driver, address…"
-          />
-          <Sel value={type} options={TYPE_OPTS} onChange={t => { setType(t); setPage(1); }} />
-          <span style={{ fontSize: "0.72rem", color: "#6b7280", fontFamily: "monospace" }}>
+        {/* Filter bar */}
+        <div style={{
+          display:"flex", gap:10, flexWrap:"wrap",
+          alignItems:"center", marginBottom:"1rem",
+        }}>
+          <Tabs tabs={statusTabs} active={statusF} onChange={s=>{setStatusF(s);setPage(1);}}/>
+          <div style={{flex:1}}/>
+          <SearchBar value={q} onChange={v=>{setQ(v);setPage(1);}} placeholder="Search trip, customer, driver, address…"/>
+          <Sel value={typeF} options={TYPE_OPTS} onChange={v=>{setTypeF(v);setPage(1);}}/>
+          <span style={{fontSize:"0.69rem",color:C.muted,fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}}>
             {filtered.length} results
           </span>
         </div>
 
-        {/* Table */}
+        {/* Table card */}
         <Card>
           <Table
-            headers={["Trip ID", "Type", "Customer", "Driver", "Route", "Fare", "Status", "Date", "Actions"]}
-            isEmpty={paged.length === 0}
-            emptyMessage="No rides found"
+            headers={["Trip ID","Vehicle","Customer","Driver","Route","Fare","Status","Time","Actions"]}
+            isEmpty={paged.length===0} emptyMessage="No rides match your filters"
           >
-            {paged.map(t => (
-              <TR key={t._id} onClick={() => setSel(t)}>
-                <TD mono muted>#{t._id?.slice(-6).toUpperCase()}</TD>
-                <TD>
-                  <span style={{ fontSize: "1rem" }}>{VI[t.vehicleType?.toLowerCase()] ?? "🚗"}</span>
-                  {" "}<span style={{ fontSize: "0.75rem", color: C.muted }}>{t.type}</span>
+            {paged.map(t=>(
+              <TR key={t._id} onClick={()=>setSel(t)}>
+
+                {/* Trip ID */}
+                <TD mono muted>
+                  <span style={{fontSize:"0.72rem",letterSpacing:"0.04em"}}>
+                    #{t._id?.slice(-8).toUpperCase()}
+                  </span>
                 </TD>
+
+                {/* Vehicle */}
                 <TD>
-                  <div style={{ fontWeight: 600 }}>{t.customerId?.name ?? "—"}</div>
-                  <div style={{ fontSize: "0.7rem", color: "#6b7280", fontFamily: "monospace" }}>{t.customerId?.phone}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{fontSize:"1.05rem"}}>{VI[t.vehicleType?.toLowerCase()]??"🚗"}</span>
+                    <div>
+                      <div style={{fontSize:"0.78rem",fontWeight:600,textTransform:"capitalize"}}>{t.vehicleType}</div>
+                      <div style={{fontSize:"0.65rem",color:C.muted}}>{t.type}</div>
+                    </div>
+                  </div>
                 </TD>
+
+                {/* Customer */}
+                <TD>
+                  <div style={{fontWeight:600,fontSize:"0.84rem"}}>{t.customerId?.name??"—"}</div>
+                  <div style={{fontSize:"0.68rem",color:C.muted,fontFamily:"'JetBrains Mono',monospace",marginTop:1}}>
+                    {t.customerId?.phone}
+                  </div>
+                </TD>
+
+                {/* Driver */}
                 <TD>
                   {t.assignedDriver
-                    ? <div>
-                        <div style={{ fontWeight: 600 }}>{t.assignedDriver.name}</div>
-                        <div style={{ fontSize: "0.7rem", color: "#6b7280" }}>{t.assignedDriver.phone}</div>
-                      </div>
-                    : <span style={{ color: "#6b7280" }}>Unassigned</span>}
+                    ? <>
+                        <div style={{fontWeight:600,fontSize:"0.84rem"}}>{t.assignedDriver.name}</div>
+                        <div style={{fontSize:"0.68rem",color:C.muted,fontFamily:"'JetBrains Mono',monospace",marginTop:1}}>
+                          {t.assignedDriver.phone}
+                        </div>
+                      </>
+                    : <span style={{
+                        fontSize:"0.7rem",color:C.amber,
+                        background:C.amberDim,borderRadius:4,
+                        padding:"2px 7px",fontFamily:"'JetBrains Mono',monospace",
+                      }}>unassigned</span>}
                 </TD>
-                <TD style={{ maxWidth: 160 }}>
-                  {/* pickup.address — correct field from Trip type */}
-                  <div style={{ fontSize: "0.7rem", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    <MapPin size={10} style={{ marginRight: 3, verticalAlign: "middle" }} />
-                    {t.pickup?.address ?? "—"}
+
+                {/* Route */}
+                <TD style={{maxWidth:185}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:3}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:C.green,flexShrink:0}}/>
+                      <span style={{fontSize:"0.71rem",color:C.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {t.pickup?.address??"—"}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{width:6,height:6,borderRadius:"50%",background:C.red,flexShrink:0}}/>
+                      <span style={{fontSize:"0.71rem",color:C.text2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {t.drop?.address??"—"}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ fontSize: "0.7rem", color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
-                    🏁 {t.drop?.address ?? "—"}
-                  </div>
                 </TD>
-                <TD mono>
-                  <span style={{ fontWeight: 700, color: "#f59e0b" }}>₹{Math.round(t.finalFare ?? t.fare ?? 0)}</span>
-                </TD>
-                <TD><Badge status={t.status} /></TD>
-                <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(t.createdAt).toLocaleDateString("en-IN")}</TD>
+
+                {/* Fare */}
                 <TD>
-                  <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
-                    {t.status === "requested" && (
-                      <Btn size="sm" variant="success" icon={<UserCheck size={11} />} onClick={() => { setSel(t); setAO(true); }}>Assign</Btn>
+                  <div style={{fontWeight:700,fontSize:"0.88rem",color:C.amber,fontFamily:"'JetBrains Mono',monospace"}}>
+                    ₹{Math.round(fare(t))}
+                  </div>
+                  <div style={{
+                    fontSize:"0.63rem",marginTop:2,fontFamily:"'JetBrains Mono',monospace",
+                    color:t.payment?.collected ? C.green : C.muted,
+                  }}>
+                    {t.payment?.collected ? "● paid" : "○ pending"}
+                  </div>
+                </TD>
+
+                {/* Status */}
+                <TD><Badge status={t.status}/></TD>
+
+                {/* Time */}
+                <TD mono muted style={{fontSize:"0.69rem",whiteSpace:"nowrap"}}>
+                  {new Date(t.createdAt).toLocaleString("en-IN",{
+                    day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:true,
+                  })}
+                </TD>
+
+                {/* Actions */}
+                <TD>
+                  <div style={{display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+                    {t.status==="requested" && (
+                      <Btn size="xs" variant="success" icon={<UserCheck size={11}/>}
+                        onClick={()=>{setSel(t);setAO(true);}}>
+                        Assign
+                      </Btn>
                     )}
-                    {["requested", "driver_assigned", "ride_started"].includes(t.status) && (
-                      <Btn size="sm" variant="danger" icon={<XCircle size={11} />} onClick={() => { setSel(t); setCO(true); }}>Cancel</Btn>
+                    {["requested","driver_assigned","ride_started"].includes(t.status) && (
+                      <Btn size="xs" variant="danger" icon={<XCircle size={11}/>}
+                        onClick={()=>{setSel(t);setCO(true);}}>
+                        Cancel
+                      </Btn>
                     )}
-                    <Btn size="sm" variant="ghost" icon={<RotateCcw size={11} />} onClick={() => setSel(t)}>Details</Btn>
+                    <Btn size="xs" variant="ghost" onClick={()=>setSel(t)}>View</Btn>
                   </div>
                 </TD>
               </TR>
             ))}
           </Table>
-          <Pagination page={page} pages={pages} total={filtered.length} perPage={PER} onChange={setPage} />
+          <Pagination page={page} pages={pages} total={filtered.length} perPage={PER} onChange={setPage}/>
         </Card>
       </div>
 
-      {/* Detail modal */}
-      <Modal open={!!sel && !assignOpen && !cancelOpen} onClose={() => setSel(null)} title="Trip Details" width={540}>
+      {/* ── TRIP DETAIL MODAL ──────────────────────────────────────────────── */}
+      <Modal
+        open={!!sel&&!assignOpen&&!cancelOpen}
+        onClose={()=>setSel(null)}
+        title={"Trip · #"+(sel?._id?.slice(-8).toUpperCase()??"")}
+        width={580}
+      >
         {sel && (
-          <>
-            {/* Map — uses trip.pickup.coordinates and trip.drop.coordinates */}
-            <RideMap trip={sel} height={240} />
+          <div style={{display:"flex",flexDirection:"column",gap:"0.9rem"}}>
 
-            <div style={{ marginTop: "1rem" }}>
-              <InfoRow label="Trip ID"      value={"#" + sel._id?.slice(-6).toUpperCase()} />
-              <InfoRow label="Type"         value={sel.type?.toUpperCase()} />
-              <InfoRow label="Vehicle"      value={(VI[sel.vehicleType?.toLowerCase()] ?? "🚗") + " " + sel.vehicleType?.toUpperCase()} />
-              <InfoRow label="Customer"     value={sel.customerId?.name ?? "—"} />
-              <InfoRow label="Phone"        value={sel.customerId?.phone ?? "—"} />
-              <InfoRow label="Driver"       value={sel.assignedDriver?.name ?? "Unassigned"} />
-              {/* pickup.address — correct field */}
-              <InfoRow label="Pickup"       value={sel.pickup?.address ?? "—"} />
-              {/* drop.address — correct field */}
-              <InfoRow label="Drop"         value={sel.drop?.address ?? "—"} />
-              <InfoRow label="Fare"         value={"₹" + Math.round(sel.finalFare ?? sel.fare ?? 0)} color="#f59e0b" />
-              <InfoRow label="Payment"      value={sel.payment?.collected ? "✅ Paid" : "⏳ Pending"} />
-              <InfoRow label="Status"       value={<Badge status={sel.status} />} />
-              <InfoRow label="Created"      value={new Date(sel.createdAt).toLocaleString("en-IN")} />
-              {sel.completedAt && (
-                <InfoRow label="Completed"  value={new Date(sel.completedAt).toLocaleString("en-IN")} />
-              )}
-              {sel.cancellationReason && (
-                <InfoRow label="Cancel Reason" value={sel.cancellationReason} color={C.red} />
-              )}
+            {/* Map */}
+            <RideMap trip={sel} height={230}/>
 
-              <SectionLabel>Timeline</SectionLabel>
-              <Timeline events={[
-                { label: "Requested",    time: sel.createdAt,     done: true,                         color: C.muted   },
-                { label: "Accepted",     time: sel.acceptedAt,    done: !!sel.acceptedAt,             color: C.cyan    },
-                { label: "Ride Started", time: sel.rideStartTime, done: !!sel.rideStartTime,          color: C.primary },
-                { label: "Completed",    time: sel.completedAt,   done: sel.status === "completed",   color: C.green   },
-                { label: "Cancelled",    time: sel.cancelledAt,   done: sel.status === "cancelled",   color: C.red     },
-              ]} />
-
-              <div style={{ display: "flex", gap: 8, marginTop: "1rem", justifyContent: "flex-end" }}>
-                {sel.status === "requested" && (
-                  <Btn variant="success" icon={<UserCheck size={13} />} onClick={() => setAO(true)}>Assign Driver</Btn>
+            {/* Status row */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <Badge status={sel.status}/>
+                <span style={{fontSize:"0.72rem",color:C.muted,fontFamily:"'JetBrains Mono',monospace"}}>
+                  {VI[sel.vehicleType?.toLowerCase()]??"🚗"} {sel.vehicleType} · {sel.type}
+                </span>
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                {sel.status==="requested" && (
+                  <Btn size="sm" variant="success" icon={<UserCheck size={12}/>} onClick={()=>setAO(true)}>
+                    Assign Driver
+                  </Btn>
                 )}
-                {["requested", "driver_assigned", "ride_started"].includes(sel.status) && (
-                  <Btn variant="danger" icon={<XCircle size={13} />} onClick={() => setCO(true)}>Cancel Trip</Btn>
+                {["requested","driver_assigned","ride_started"].includes(sel.status) && (
+                  <Btn size="sm" variant="danger" icon={<XCircle size={12}/>} onClick={()=>setCO(true)}>
+                    Cancel
+                  </Btn>
                 )}
               </div>
             </div>
-          </>
+
+            {/* Metric mini row */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"0.5rem"}}>
+              {[
+                {l:"Fare",    v:"₹"+fare(sel).toFixed(2),              c:C.amber},
+                {l:"Payment", v:sel.payment?.collected?"✅ Paid":"⏳ Pending", c:sel.payment?.collected?C.green:C.amber},
+                {l:"OTP",     v:sel.otp??"—",                          c:C.cyan},
+              ].map(x=>(
+                <div key={x.l} style={{
+                  background:C.surface2,borderRadius:7,padding:"0.55rem",
+                  textAlign:"center",border:"1px solid "+C.border,
+                }}>
+                  <div style={{fontSize:"0.57rem",color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>{x.l}</div>
+                  <div style={{fontWeight:700,color:x.c,fontSize:"0.82rem",fontFamily:"'JetBrains Mono',monospace"}}>{x.v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Info rows */}
+            <div style={{background:C.surface2,borderRadius:8,overflow:"hidden",border:"1px solid "+C.border}}>
+              <InfoRow label="Customer" value={(sel.customerId?.name??"—")+(sel.customerId?.phone?" · "+sel.customerId.phone:"")}/>
+              <InfoRow label="Driver"   value={sel.assignedDriver?sel.assignedDriver.name+" · "+sel.assignedDriver.phone:"Not assigned"}/>
+              <InfoRow label="Pickup"   value={sel.pickup?.address??"—"}/>
+              <InfoRow label="Drop"     value={sel.drop?.address??"—"}/>
+              <InfoRow label="Created"  value={new Date(sel.createdAt).toLocaleString("en-IN")}/>
+              {sel.completedAt && <InfoRow label="Completed" value={new Date(sel.completedAt).toLocaleString("en-IN")}/>}
+              {sel.cancellationReason && <InfoRow label="Reason" value={sel.cancellationReason} color={C.red}/>}
+            </div>
+
+            {/* Timeline */}
+            <div style={{background:C.surface2,borderRadius:8,padding:"0.875rem",border:"1px solid "+C.border}}>
+              <SectionLabel>Timeline</SectionLabel>
+              <Timeline events={[
+                {label:"Requested",    time:sel.createdAt,     done:true,                       color:C.muted  },
+                {label:"Accepted",     time:sel.acceptedAt,    done:!!sel.acceptedAt,           color:C.cyan   },
+                {label:"Ride Started", time:sel.rideStartTime, done:!!sel.rideStartTime,        color:C.primary},
+                {label:"Completed",    time:sel.completedAt,   done:sel.status==="completed",   color:C.green  },
+                {label:"Cancelled",    time:sel.cancelledAt,   done:sel.status==="cancelled",   color:C.red    },
+              ]}/>
+            </div>
+
+          </div>
         )}
       </Modal>
 
-      {/* Assign driver modal */}
-      <Modal open={assignOpen} onClose={() => setAO(false)} title="Assign Driver" width={400}>
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          <p style={{ margin: 0, color: C.muted, fontSize: "0.85rem" }}>
-            Select an online driver for trip #{sel?._id?.slice(-6).toUpperCase()}.
-          </p>
+      {/* ── ASSIGN DRIVER ─────────────────────────────────────────────────── */}
+      <Modal open={assignOpen} onClose={()=>setAO(false)} title="Assign Driver" width={420}>
+        <div style={{display:"flex",flexDirection:"column",gap:"0.9rem"}}>
+          <div style={{
+            background:C.amberDim,border:"1px solid "+C.amber+"28",
+            borderRadius:7,padding:"8px 12px",
+            fontSize:"0.78rem",color:C.amber,
+          }}>
+            Trip #{sel?._id?.slice(-8).toUpperCase()} · {sel?.pickup?.address?.slice(0,45)}
+          </div>
           <Sel
+            label="Online Driver"
             value={assignDrvr}
             onChange={setAD}
             options={[
-              { value: "", label: "Select driver…" },
-              ...drivers
-                .filter(d => d.isOnline && !d.isBlocked)
-                .map(d => ({ value: d._id, label: `${d.name} · ${d.vehicleType ?? ""} · ${d.phone}` })),
+              {value:"",label:"Select a driver…"},
+              ...drivers.filter(d=>d.isOnline&&!d.isBlocked)
+                .map(d=>({value:d._id,label:d.name+" · "+(d.vehicleType??"")+" · "+d.phone})),
             ]}
-            style={{ width: "100%" }}
+            style={{width:"100%"}}
           />
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn variant="ghost" onClick={() => setAO(false)}>Cancel</Btn>
-            <Btn variant="success" onClick={doAssign} disabled={!assignDrvr} loading={acting}>Assign</Btn>
+          {drivers.filter(d=>d.isOnline&&!d.isBlocked).length===0 && (
+            <p style={{fontSize:"0.77rem",color:C.muted,textAlign:"center"}}>No online drivers available</p>
+          )}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn variant="ghost" onClick={()=>setAO(false)}>Cancel</Btn>
+            <Btn variant="success" onClick={doAssign} disabled={!assignDrvr} loading={acting}>
+              Assign Driver
+            </Btn>
           </div>
         </div>
       </Modal>
 
-      {/* Cancel confirm */}
+      {/* ── CANCEL CONFIRM ────────────────────────────────────────────────── */}
       <ConfirmDialog
-        open={cancelOpen} onClose={() => setCO(false)} onConfirm={doCancel}
+        open={cancelOpen} onClose={()=>setCO(false)} onConfirm={doCancel}
         title="Cancel Trip"
-        message={`Cancel trip #${sel?._id?.slice(-6).toUpperCase()}? This cannot be undone.`}
-        confirmLabel="Yes, Cancel" danger loading={acting}
+        message={`Cancel trip #${sel?._id?.slice(-8).toUpperCase()}? The customer will be notified. This action cannot be undone.`}
+        confirmLabel="Yes, Cancel Trip" danger loading={acting}
       />
     </div>
   );

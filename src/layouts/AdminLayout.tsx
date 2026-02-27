@@ -2,188 +2,250 @@ import React, { useState } from "react";
 import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Car, Users, CreditCard, Map, Shield, Package,
-  Star, Monitor, UserCog, Zap, Search, Scale,
-  DollarSign, ChevronDown, ChevronRight, LogOut, Menu, X,
-  Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
-  FileText, Ticket,
+  Star, Monitor, UserCog, Zap, Search, Scale, DollarSign,
+  ChevronDown, ChevronRight, LogOut, Menu, TrendingUp,
+  Activity, CircleDot,
 } from "lucide-react";
 import { C } from "../components/ui";
 
-interface NavItem {
-  path: string;
-  label: string;
-  icon: React.ReactNode;
-  badge?: number | string;
-}
-interface NavGroup {
-  key: string;
-  label: string;
-  items: NavItem[];
-}
-
-const GROUPS: NavGroup[] = [
+const NAV = [
   {
-    key: "overview",
-    label: "Overview",
-    items: [
-      { path: "/analytics",  label: "Analytics",  icon: <LayoutDashboard size={16} /> },
-      { path: "/money-flow", label: "Money Flow",  icon: <DollarSign size={16} /> },
+    key:"overview", label:"Overview",
+    items:[
+      { path:"/analytics",  label:"Dashboard",  icon:<LayoutDashboard size={14}/> },
+      { path:"/money-flow", label:"Money Flow",  icon:<TrendingUp size={14}/> },
     ],
   },
   {
-    key: "ops",
-    label: "Operations",
-    items: [
-      { path: "/rides",         label: "Ride Management",   icon: <Car size={16} />        },
-      { path: "/drivers",       label: "Driver Management", icon: <UserCog size={16} />    },
-      { path: "/earnings",      label: "Driver Earnings",   icon: <TrendingUp size={16} /> },
-      { path: "/documents",     label: "Documents",         icon: <FileText size={16} />   },
-      { path: "/parcels",       label: "Parcel Delivery",   icon: <Package size={16} />    },
-      { path: "/gps",           label: "GPS Monitoring",    icon: <Map size={16} />        },
-      { path: "/service-areas", label: "Service Areas",     icon: <MapPin size={16} />     },
+    key:"ops", label:"Operations",
+    items:[
+      { path:"/rides",   label:"Rides",    icon:<Car size={14}/> },
+      { path:"/drivers", label:"Drivers",  icon:<UserCog size={14}/> },
+      { path:"/parcels", label:"Parcels",  icon:<Package size={14}/> },
+      { path:"/gps",     label:"GPS Live", icon:<Map size={14}/> },
     ],
   },
   {
-    key: "users",
-    label: "Users",
-    items: [
-      { path: "/customers", label: "User Accounts", icon: <Users size={16} /> },
-      { path: "/ratings",   label: "Ratings",       icon: <Star size={16} />  },
+    key:"people", label:"People",
+    items:[
+      { path:"/customers", label:"Customers", icon:<Users size={14}/> },
+      { path:"/ratings",   label:"Ratings",   icon:<Star size={14}/> },
     ],
   },
   {
-    key: "finance",
-    label: "Finance",
-    items: [
-      { path: "/payments",        label: "Payments & Refunds", icon: <CreditCard size={16} /> },
-      { path: "/fare-management", label: "Fare Management",    icon: <Receipt size={16} />    },
-      { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={16} />        },
-      { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={16} />    },
-      { path: "/incentives",      label: "Incentives",         icon: <Gift size={16} />       },
-      { path: "/coupons",         label: "Coupons",            icon: <Ticket size={16} />     }, // ✅ added
+    key:"finance", label:"Finance",
+    items:[
+      { path:"/payments",        label:"Payments",   icon:<CreditCard size={14}/> },
+      { path:"/fare-management", label:"Fare Rates",  icon:<Zap size={14}/> },
+      { path:"/fare-pricing",    label:"Promos",      icon:<DollarSign size={14}/> },
     ],
   },
   {
-    key: "safety",
-    label: "Safety & Trust",
-    items: [
-      { path: "/safety",  label: "Complaints",      icon: <Shield size={16} />     },
-      { path: "/support", label: "Admin Support",   icon: <HelpCircle size={16} /> },
-      { path: "/fraud",   label: "Fraud Detection", icon: <Search size={16} />     },
+    key:"trust", label:"Safety & Trust",
+    items:[
+      { path:"/safety", label:"Complaints",  icon:<Shield size={14}/> },
+      { path:"/fraud",  label:"Fraud",       icon:<Search size={14}/> },
     ],
   },
   {
-    key: "system",
-    label: "System",
-    items: [
-      { path: "/tech",          label: "Tech Monitoring",    icon: <Monitor size={16} />    },
-      { path: "/legal",         label: "Legal & Compliance", icon: <Scale size={16} />      },
-      { path: "/notifications", label: "Notifications",      icon: <Bell size={16} />       },
-      { path: "/help",          label: "Help Management",    icon: <HelpCircle size={16} /> },
+    key:"system", label:"System",
+    items:[
+      { path:"/tech",  label:"Tech Monitor", icon:<Monitor size={14}/> },
+      { path:"/legal", label:"Legal",         icon:<Scale size={14}/> },
     ],
   },
 ];
 
+const SIDEBAR_W  = 210;
+const COLLAPSED_W = 50;
+
 export default function AdminLayout() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const [open, setOpen]     = useState<Record<string, boolean>>(Object.fromEntries(GROUPS.map(g => [g.key, true])));
-  const [collapsed, setCol] = useState(false);
-
-  const toggle = (key: string) => setOpen(v => ({ ...v, [key]: !v[key] }));
-
-  const logout = () => {
-    localStorage.removeItem("adminToken");
-    navigate("/login");
-  };
+  const navigate  = useNavigate();
+  const [open, setOpen] = useState<Record<string,boolean>>(
+    Object.fromEntries(NAV.map(g=>[g.key,true]))
+  );
+  const [col, setCol] = useState(false);
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, fontFamily: "'Syne','Segoe UI',sans-serif" }}>
+    <div style={{display:"flex", height:"100vh", overflow:"hidden", background:C.bg, fontFamily:"'Inter',sans-serif"}}>
       <style>{`
-        @keyframes spin{to{transform:rotate(360deg)}}
-        .nav-item{transition:background 0.12s,color 0.12s}
-        .nav-item:hover{background:rgba(255,255,255,0.04)!important}
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+        @keyframes spin    { to{transform:rotate(360deg)} }
+        @keyframes fadeUp  { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes fadeIn  { from{opacity:0} to{opacity:1} }
+        @keyframes liveDot { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }
+        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.4} }
         ::-webkit-scrollbar{width:4px;height:4px}
         ::-webkit-scrollbar-track{background:transparent}
-        ::-webkit-scrollbar-thumb{background:#2d3748;border-radius:4px}
-        input,select{color-scheme:dark}
-        *{box-sizing:border-box}
+        ::-webkit-scrollbar-thumb{background:${C.border3};border-radius:3px}
+        input,select{color-scheme:dark;font-family:'Inter',sans-serif}
+        input::placeholder{color:${C.muted}}
+
+        /* Button */
+        .pr-btn{transition:all .13s ease;user-select:none}
+        .pr-btn:hover:not(:disabled){filter:brightness(1.12);transform:translateY(-1px)}
+        .pr-btn:active:not(:disabled){transform:translateY(0);filter:brightness(.96)}
+        /* Table row */
+        .pr-row{transition:background .08s;cursor:pointer}
+        .pr-row:hover{background:${C.surface3}!important}
+        /* Card hover */
+        .pr-card{transition:border-color .2s,box-shadow .2s}
+        .pr-card:hover{border-color:${C.border3}!important;box-shadow:0 4px 24px rgba(0,0,0,.35)}
+        /* Tab */
+        .pr-tab{transition:all .13s ease}
+        .pr-tab:hover:not(.pr-tab-active){color:${C.text2}!important;background:${C.surface3}!important}
+        /* Input focus */
+        .pr-input:focus{border-color:${C.primary}!important;outline:none}
+        .pr-select:focus{border-color:${C.primary}!important;outline:none}
+
+        /* Nav link */
+        .nav-lnk{display:block;text-decoration:none;margin:1px 5px}
+        .nav-lnk .nav-in{
+          display:flex;align-items:center;gap:9px;
+          padding:7px 9px;border-radius:7px;
+          border-left:2px solid transparent;
+          transition:all .12s ease;
+        }
+        .nav-lnk:hover .nav-in{background:${C.surface3}}
+        .nav-lnk.active .nav-in{
+          background:${C.primaryDim};
+          border-left-color:${C.primary};
+        }
+        .nav-lnk.active .nav-ico{color:${C.primary}!important}
+        .nav-lnk.active .nav-txt{color:${C.primary}!important;font-weight:700!important}
+
+        .grp-btn{
+          width:100%;padding:4px 14px;background:none;border:none;
+          cursor:pointer;display:flex;align-items:center;justify-content:space-between;
+          gap:6px;margin-top:8px;transition:background .1s;border-radius:6px;
+        }
+        .grp-btn:hover{background:${C.surface2}}
       `}</style>
 
-      {/* Sidebar */}
+      {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
       <aside style={{
-        width: collapsed ? 56 : 230,
-        flexShrink: 0,
-        background: "#0e1015",
-        borderRight: "1px solid " + C.border,
-        display: "flex",
-        flexDirection: "column",
-        position: "sticky",
-        top: 0,
-        height: "100vh",
-        overflow: "hidden",
-        transition: "width 0.22s cubic-bezier(.4,0,.2,1)",
-        zIndex: 40,
+        width: col ? COLLAPSED_W : SIDEBAR_W,
+        flexShrink:0,
+        background:C.surface,
+        borderRight:"1px solid "+C.border,
+        display:"flex", flexDirection:"column",
+        overflow:"hidden",
+        transition:"width 0.2s cubic-bezier(.4,0,.2,1)",
+        zIndex:40,
       }}>
-        {/* Logo */}
-        <div style={{ padding: collapsed ? "1rem 0" : "1.1rem 1.25rem", borderBottom: "1px solid " + C.border, display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", flexShrink: 0 }}>
-          {!collapsed && (
-            <div>
-              <div style={{ fontWeight: 900, fontSize: "1rem", color: C.text, letterSpacing: "-0.03em" }}>🚘 GoIndia</div>
-              <div style={{ fontSize: "0.6rem", fontFamily: "monospace", color: C.muted, letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 1 }}>Admin Panel</div>
+
+        {/* Logo bar */}
+        <div style={{
+          height:54,
+          display:"flex", alignItems:"center",
+          justifyContent: col ? "center" : "space-between",
+          padding: col ? "0" : "0 10px 0 14px",
+          borderBottom:"1px solid "+C.border, flexShrink:0,
+          gap:8,
+        }}>
+          {!col && (
+            <div style={{display:"flex", alignItems:"center", gap:9, minWidth:0}}>
+              <div style={{
+                width:30, height:30, borderRadius:8,
+                background:C.primaryDim, border:"1px solid "+C.primaryBrd,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:"1rem", flexShrink:0,
+              }}>🚘</div>
+              <div>
+                <div style={{fontWeight:800, fontSize:"0.92rem", color:C.text, letterSpacing:"-0.02em"}}>GoIndia</div>
+                <div style={{
+                  fontSize:"0.54rem", color:C.muted,
+                  fontFamily:"'JetBrains Mono',monospace",
+                  letterSpacing:"0.12em", textTransform:"uppercase",
+                }}>Admin Center</div>
+              </div>
             </div>
           )}
-          {collapsed && <span style={{ fontSize: "1.2rem" }}>🚘</span>}
-          <button onClick={() => setCol(v => !v)} style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4, borderRadius: 6, display: "flex", alignItems: "center" }}>
-            {collapsed ? <Menu size={16} /> : <X size={14} />}
+          {col && <span style={{fontSize:"1.1rem"}}>🚘</span>}
+          <button
+            onClick={()=>setCol(v=>!v)}
+            style={{
+              background:"none", border:"none", cursor:"pointer",
+              color:C.muted, padding:5, borderRadius:6,
+              display:"flex", alignItems:"center", flexShrink:0,
+              transition:"color .12s",
+            }}
+          >
+            <Menu size={15}/>
           </button>
         </div>
 
+        {/* Live indicator */}
+        {!col && (
+          <div style={{
+            margin:"8px 12px 2px",
+            padding:"6px 10px",
+            background:C.greenDim,
+            border:"1px solid "+C.green+"22",
+            borderRadius:7,
+            display:"flex", alignItems:"center", gap:7,
+          }}>
+            <span style={{
+              width:6, height:6, borderRadius:"50%", background:C.green,
+              animation:"liveDot 1.6s ease-in-out infinite", flexShrink:0,
+              boxShadow:"0 0 5px "+C.green,
+            }}/>
+            <span style={{fontSize:"0.7rem", color:C.green, fontWeight:600}}>System Live</span>
+          </div>
+        )}
+
         {/* Nav */}
-        <nav style={{ flex: 1, overflowY: "auto", overflowX: "hidden", padding: collapsed ? "0.5rem 0" : "0.5rem 0.5rem" }}>
-          {GROUPS.map(group => (
-            <div key={group.key} style={{ marginBottom: collapsed ? 0 : 4 }}>
-              {!collapsed && (
+        <nav style={{flex:1, overflowY:"auto", overflowX:"hidden", padding:"6px 0 8px"}}>
+          {NAV.map(group=>(
+            <div key={group.key}>
+              {!col && (
                 <button
-                  onClick={() => toggle(group.key)}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "6px 10px", background: "none", border: "none", cursor: "pointer", color: C.muted, marginTop: 6 }}
+                  className="grp-btn"
+                  onClick={()=>setOpen(v=>({...v,[group.key]:!v[group.key]}))}
                 >
-                  <span style={{ fontSize: "0.58rem", fontFamily: "monospace", letterSpacing: "0.18em", textTransform: "uppercase" }}>{group.label}</span>
-                  {open[group.key] ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                  <span style={{
+                    fontSize:"0.59rem", color:C.muted,
+                    fontFamily:"'JetBrains Mono',monospace",
+                    letterSpacing:"0.12em", textTransform:"uppercase",
+                  }}>{group.label}</span>
+                  <span style={{color:C.muted, display:"flex"}}>
+                    {open[group.key] ? <ChevronDown size={9}/> : <ChevronRight size={9}/>}
+                  </span>
                 </button>
               )}
 
-              {(open[group.key] || collapsed) && group.items.map(item => {
-                const active = location.pathname === item.path || location.pathname.startsWith(item.path + "/");
+              {(open[group.key]||col) && group.items.map(item=>{
+                const isActive = location.pathname===item.path
+                  || (item.path!=="/" && location.pathname.startsWith(item.path));
                 return (
                   <NavLink
                     key={item.path}
                     to={item.path}
-                    className="nav-item"
-                    title={collapsed ? item.label : undefined}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: collapsed ? 0 : 9,
-                      justifyContent: collapsed ? "center" : "flex-start",
-                      padding: collapsed ? "10px 0" : "8px 10px",
-                      borderRadius: collapsed ? 0 : 9,
-                      marginBottom: 2,
-                      textDecoration: "none",
-                      color: active ? "#fff" : C.muted,
-                      background: active ? C.primary : "transparent",
-                      fontWeight: active ? 700 : 500,
-                      fontSize: "0.83rem",
-                      position: "relative",
-                    }}
+                    className={"nav-lnk"+(isActive?" active":"")}
+                    title={col?item.label:undefined}
                   >
-                    <span style={{ flexShrink: 0, opacity: active ? 1 : 0.7 }}>{item.icon}</span>
-                    {!collapsed && <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>}
-                    {!collapsed && item.badge !== undefined && (
-                      <span style={{ marginLeft: "auto", background: active ? "rgba(255,255,255,0.25)" : C.border, borderRadius: 20, padding: "0 7px", fontSize: "0.6rem", fontFamily: "monospace" }}>
-                        {item.badge}
-                      </span>
-                    )}
+                    <div className="nav-in" style={{
+                      justifyContent: col?"center":"flex-start",
+                      padding: col?"8px 0":"7px 9px",
+                      gap: col?0:9,
+                    }}>
+                      <span className="nav-ico" style={{
+                        color: isActive ? C.primary : C.muted,
+                        display:"flex", flexShrink:0,
+                        transition:"color .12s",
+                      }}>{item.icon}</span>
+                      {!col && (
+                        <span className="nav-txt" style={{
+                          fontSize:"0.83rem",
+                          fontWeight: isActive?600:500,
+                          color: isActive?C.primary:C.text2,
+                          overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+                          transition:"color .12s",
+                        }}>{item.label}</span>
+                      )}
+                    </div>
                   </NavLink>
                 );
               })}
@@ -191,27 +253,31 @@ export default function AdminLayout() {
           ))}
         </nav>
 
-        {/* Footer */}
-        <div style={{ padding: collapsed ? "0.75rem 0" : "0.875rem 0.75rem", borderTop: "1px solid " + C.border, flexShrink: 0 }}>
+        {/* Logout */}
+        <div style={{padding:"6px 5px 8px", borderTop:"1px solid "+C.border, flexShrink:0}}>
           <button
-            onClick={logout}
-            className="nav-item"
+            onClick={()=>{localStorage.removeItem("adminToken");navigate("/login");}}
             style={{
-              display: "flex", alignItems: "center", gap: collapsed ? 0 : 9, justifyContent: collapsed ? "center" : "flex-start",
-              width: "100%", padding: collapsed ? "8px 0" : "8px 10px",
-              background: "none", border: "none", cursor: "pointer",
-              color: C.muted, fontSize: "0.83rem", borderRadius: 9,
+              width:"100%", background:"none", border:"none", cursor:"pointer",
+              display:"flex", alignItems:"center",
+              justifyContent: col?"center":"flex-start",
+              gap:9, padding: col?"8px 0":"7px 9px",
+              color:C.muted, fontSize:"0.83rem",
+              fontFamily:"'Inter',sans-serif", borderRadius:7,
+              transition:"all .12s",
             }}
+            onMouseEnter={e=>{(e.currentTarget as HTMLElement).style.color=C.red;(e.currentTarget as HTMLElement).style.background=C.redDim;}}
+            onMouseLeave={e=>{(e.currentTarget as HTMLElement).style.color=C.muted;(e.currentTarget as HTMLElement).style.background="none";}}
           >
-            <LogOut size={15} />
-            {!collapsed && "Log Out"}
+            <LogOut size={14}/>
+            {!col && "Log out"}
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
-      <main style={{ flex: 1, minWidth: 0, overflow: "auto" }}>
-        <Outlet />
+      {/* ── MAIN ───────────────────────────────────────────────────────────── */}
+      <main style={{flex:1, minWidth:0, overflow:"auto", background:C.bg}}>
+        <Outlet/>
       </main>
     </div>
   );
