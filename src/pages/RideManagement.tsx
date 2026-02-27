@@ -38,7 +38,7 @@ function loadGoogleMapsScript(cb: () => void) {
   if (_scriptState === "loading") return;
   _scriptState = "loading";
   const s = document.createElement("script");
-  s.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=geometry`;
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=geometry,directions`;
   s.async = true;
   s.defer = true;
   s.onload = () => {
@@ -169,28 +169,48 @@ function RideMap({ trip, height = 220 }: RideMapProps) {
       overlays.push(m, iw);
     }
 
-    // Dashed route line between pickup and drop
+    // Draw real road route via Directions API
     if (pickupLatLng && dropLatLng) {
-      const poly = new g.Polyline({
-        path: [pickupLatLng, dropLatLng],
-        geodesic: true,
-        strokeColor: "#6366f1",
-        strokeOpacity: 0.9,
-        strokeWeight: 3,
-        icons: [{
-          icon: { path: "M 0,-1 0,1", strokeOpacity: 1, scale: 3 },
-          offset: "0",
-          repeat: "18px",
-        }],
+      const directionsService  = new g.DirectionsService();
+      const directionsRenderer = new g.DirectionsRenderer({
         map,
+        suppressMarkers: true,       // keep our custom SVG pins
+        polylineOptions: {
+          strokeColor: "#6366f1",
+          strokeOpacity: 0.9,
+          strokeWeight: 4,
+        },
       });
-      overlays.push(poly);
+      // Push renderer so cleanup can remove it
+      overlays.push({ setMap: (m: any) => directionsRenderer.setMap(m) });
 
-      // Fit map to show both points
-      const bounds = new g.LatLngBounds();
-      bounds.extend(pickupLatLng);
-      bounds.extend(dropLatLng);
-      map.fitBounds(bounds, { top: 32, right: 32, bottom: 32, left: 32 });
+      directionsService.route(
+        {
+          origin: pickupLatLng,
+          destination: dropLatLng,
+          travelMode: g.TravelMode.DRIVING,
+        },
+        (result: any, status: any) => {
+          if (status === "OK") {
+            directionsRenderer.setDirections(result);
+            // fitBounds is handled automatically by DirectionsRenderer
+          } else {
+            // Fallback straight line if Directions API fails / quota exceeded
+            const poly = new g.Polyline({
+              path: [pickupLatLng, dropLatLng],
+              strokeColor: "#6366f1",
+              strokeOpacity: 0.6,
+              strokeWeight: 3,
+              map,
+            });
+            overlays.push(poly);
+            const bounds = new g.LatLngBounds();
+            bounds.extend(pickupLatLng);
+            bounds.extend(dropLatLng);
+            map.fitBounds(bounds, { top: 40, right: 40, bottom: 40, left: 40 });
+          }
+        }
+      );
     }
 
     return () => overlays.forEach(o => { try { o.setMap ? o.setMap(null) : o.close(); } catch {} });
