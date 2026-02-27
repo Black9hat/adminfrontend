@@ -563,10 +563,10 @@ export default function AdminSupport() {
   });
 
   return (
-    <div className="fixed inset-0 flex bg-slate-100">
+    <div className="flex h-full bg-slate-100">
       
       {/* LEFT SIDEBAR */}
-      <div className="w-[380px] min-w-[380px] bg-white shadow-2xl flex flex-col border-r border-slate-200 h-full">
+      <div className="w-[380px] min-w-[380px] bg-white shadow-2xl flex flex-col border-r border-slate-200" style={{ maxHeight: '100vh', overflowY: 'auto' }}>
         {/* Header */}
         <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-700 p-5 flex-shrink-0">
           <div className="flex items-center justify-between mb-5">
