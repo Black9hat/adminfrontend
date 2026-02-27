@@ -181,7 +181,7 @@ const FareManagement: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center" style={{ backgroundColor: COLORS.surface }}>
+      <div className="flex items-center justify-center" style={{ minHeight: '100%', backgroundColor: COLORS.surface }}>
         <div className="text-center">
           <div className="w-12 h-12 border-4 rounded-full animate-spin mx-auto mb-4" 
                style={{ borderColor: COLORS.primaryLight, borderTopColor: COLORS.primary }}></div>
@@ -192,7 +192,7 @@ const FareManagement: React.FC = () => {
   }
 
   return (
-    <div className="fixed inset-0 flex" style={{ backgroundColor: COLORS.surface }}>
+    <div className="flex h-full" style={{ minHeight: '100%', backgroundColor: COLORS.surface }}>
       {/* LEFT SIDEBAR */}
       <div className="w-[420px] min-w-[420px] flex flex-col border-r h-full" 
            style={{ backgroundColor: COLORS.background, borderColor: COLORS.divider }}>
