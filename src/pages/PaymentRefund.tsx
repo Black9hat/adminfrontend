@@ -75,77 +75,142 @@ export default function PaymentRefund() {
   if (error)   return <PageError message={error} onRetry={refetch} />;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, padding: "1.75rem", fontFamily: "'Syne','Segoe UI',sans-serif" }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    <div style={{
+      minHeight: "100vh",
+      width: "100%",
+      display: "flex",
+      flexDirection: "column",
+      background: "linear-gradient(135deg, #0f1117 0%, #131820 100%)",
+      fontFamily: "'Syne','Segoe UI',sans-serif",
+      margin: 0,
+      padding: 0,
+    }}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(99,102,241,0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(99,102,241,0.6); }
+      `}</style>
 
-      <PageHeader
-        title="Payments & Refunds" icon="💳"
-        sub={payments.length + " transactions"}
-        actions={<>
+      {/* Header */}
+      <div style={{
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(0,0,0,0.3)",
+        padding: "1.5rem 2rem",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        backdropFilter: "blur(10px)",
+        flexShrink: 0,
+      }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "6px" }}>
+            <span style={{ fontSize: "1.8rem" }}>💳</span>
+            <h1 style={{
+              margin: 0,
+              fontSize: "1.75rem",
+              fontWeight: 900,
+              color: "#f1f5f9",
+              letterSpacing: "-0.02em",
+            }}>
+              Payments & Refunds
+            </h1>
+          </div>
+          <p style={{ margin: 0, fontSize: "0.85rem", color: "#94a3b8" }}>
+            {payments.length} transactions
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <Btn icon={<Download size={14} />} variant="ghost" onClick={exportCsv}>Export CSV</Btn>
           <Btn icon={<RefreshCw size={14} />} variant="ghost" onClick={refetch}>Refresh</Btn>
-        </>}
-      />
-
-      {/* KPI row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Total Revenue"   value={"₹" + Math.round(stats.total).toLocaleString("en-IN")} icon="💰" color={C.amber} />
-        <StatCard label="Today Revenue"   value={"₹" + Math.round(stats.today).toLocaleString("en-IN")} icon="📅" color={C.primary} />
-        <StatCard label="Successful"      value={stats.success}  icon="✅" color={C.green}  />
-        <StatCard label="Failed"          value={stats.failed}   icon="❌" color={C.red}    />
-        <StatCard label="Pending"         value={stats.pending}  icon="⏳" color={C.amber}  />
-        <StatCard label="Refunded"        value={stats.refunded} icon="↩️" color={C.purple} />
+        </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs
-        tabs={[
-          { key: "all",      label: "All",       count: payments.length },
-          { key: "online",   label: "Online/UPI" },
-          { key: "cash",     label: "Cash"       },
-          { key: "failed",   label: "Failed",    count: stats.failed  },
-          { key: "refunded", label: "Refunded",  count: stats.refunded },
-        ]}
-        active={tab} onChange={k => { setTab(k); setPage(1); }}
-      />
+      {/* Scrollable Content */}
+      <div style={{
+        flex: 1,
+        overflowY: "auto",
+        overflowX: "hidden",
+        padding: "2rem",
+        width: "100%",
+      }}>
+        {/* KPI row */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: "1rem",
+          marginBottom: "2rem",
+        }}>
+          <StatCard label="Total Revenue"   value={"₹" + Math.round(stats.total).toLocaleString("en-IN")} icon="💰" color={C.amber} />
+          <StatCard label="Today Revenue"   value={"₹" + Math.round(stats.today).toLocaleString("en-IN")} icon="📅" color={C.primary} />
+          <StatCard label="Successful"      value={stats.success}  icon="✅" color={C.green}  />
+          <StatCard label="Failed"          value={stats.failed}   icon="❌" color={C.red}    />
+          <StatCard label="Pending"         value={stats.pending}  icon="⏳" color={C.amber}  />
+          <StatCard label="Refunded"        value={stats.refunded} icon="↩️" color={C.purple} />
+        </div>
 
-      {/* Search */}
-      <div style={{ display: "flex", gap: 10, margin: "1rem 0", flexWrap: "wrap" }}>
-        <SearchBar value={q} onChange={v => { setQ(v); setPage(1); }} placeholder="Search by trip ID, phone, Razorpay ID…" />
-        <span style={{ fontSize: "0.72rem", color: C.muted, alignSelf: "center", fontFamily: "monospace" }}>{filtered.length} results</span>
+        {/* Tabs */}
+        <div style={{ marginBottom: "1.5rem" }}>
+          <Tabs
+            tabs={[
+              { key: "all",      label: "All",       count: payments.length },
+              { key: "online",   label: "Online/UPI" },
+              { key: "cash",     label: "Cash"       },
+              { key: "failed",   label: "Failed",    count: stats.failed  },
+              { key: "refunded", label: "Refunded",  count: stats.refunded },
+            ]}
+            active={tab} onChange={k => { setTab(k); setPage(1); }}
+          />
+        </div>
+
+        {/* Search */}
+        <div style={{
+          display: "flex",
+          gap: 10,
+          margin: "1.5rem 0",
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}>
+          <SearchBar value={q} onChange={v => { setQ(v); setPage(1); }} placeholder="Search by trip ID, phone, Razorpay ID…" />
+          <span style={{ fontSize: "0.72rem", color: "#6b7280", fontFamily: "monospace" }}>
+            {filtered.length} results
+          </span>
+        </div>
+
+        {/* Table */}
+        <Card>
+          <Table
+            headers={["Trip ID", "Customer", "Amount", "Method", "Status", "Razorpay ID", "Date", "Actions"]}
+            isEmpty={paged.length === 0} emptyMessage="No transactions found"
+          >
+            {paged.map(p => (
+              <TR key={p._id} onClick={() => setSel(p)}>
+                <TD mono muted>#{p.tripId?.slice(-8).toUpperCase()}</TD>
+                <TD>
+                  <div style={{ fontWeight: 600 }}>{p.customerName ?? "—"}</div>
+                  <div style={{ fontSize: "0.7rem", color: "#6b7280", fontFamily: "monospace" }}>{p.customerPhone}</div>
+                </TD>
+                <TD mono><span style={{ fontWeight: 700, color: "#f59e0b" }}>₹{p.amount.toFixed(2)}</span></TD>
+                <TD><Badge status={p.method === "cash" ? "offline" : "online"} label={p.method?.toUpperCase()} /></TD>
+                <TD><Badge status={p.status} /></TD>
+                <TD mono muted style={{ fontSize: "0.7rem" }}>{p.razorpayPaymentId ? p.razorpayPaymentId.slice(0, 18) + "…" : "—"}</TD>
+                <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(p.createdAt).toLocaleDateString("en-IN")}</TD>
+                <TD>
+                  <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
+                    {p.status === "success" && p.razorpayPaymentId && (
+                      <Btn size="sm" variant="warning" icon={<RotateCcw size={11} />} onClick={() => { setSel(p); setRO(true); }}>Refund</Btn>
+                    )}
+                    <Btn size="sm" variant="ghost" icon={<Wallet size={11} />} onClick={() => { setSel(p); setWO(true); }}>Wallet</Btn>
+                  </div>
+                </TD>
+              </TR>
+            ))}
+          </Table>
+          <Pagination page={page} pages={pages} total={filtered.length} perPage={PER} onChange={setPage} />
+        </Card>
       </div>
-
-      {/* Table */}
-      <Card>
-        <Table
-          headers={["Trip ID", "Customer", "Amount", "Method", "Status", "Razorpay ID", "Date", "Actions"]}
-          isEmpty={paged.length === 0} emptyMessage="No transactions found"
-        >
-          {paged.map(p => (
-            <TR key={p._id} onClick={() => setSel(p)}>
-              <TD mono muted>#{p.tripId?.slice(-8).toUpperCase()}</TD>
-              <TD>
-                <div style={{ fontWeight: 600 }}>{p.customerName ?? "—"}</div>
-                <div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{p.customerPhone}</div>
-              </TD>
-              <TD mono><span style={{ fontWeight: 700, color: C.amber }}>₹{p.amount.toFixed(2)}</span></TD>
-              <TD><Badge status={p.method === "cash" ? "offline" : "online"} label={p.method?.toUpperCase()} /></TD>
-              <TD><Badge status={p.status} /></TD>
-              <TD mono muted style={{ fontSize: "0.7rem" }}>{p.razorpayPaymentId ? p.razorpayPaymentId.slice(0, 18) + "…" : "—"}</TD>
-              <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(p.createdAt).toLocaleDateString("en-IN")}</TD>
-              <TD>
-                <div style={{ display: "flex", gap: 6 }} onClick={e => e.stopPropagation()}>
-                  {p.status === "success" && p.razorpayPaymentId && (
-                    <Btn size="sm" variant="warning" icon={<RotateCcw size={11} />} onClick={() => { setSel(p); setRO(true); }}>Refund</Btn>
-                  )}
-                  <Btn size="sm" variant="ghost" icon={<Wallet size={11} />} onClick={() => { setSel(p); setWO(true); }}>Wallet</Btn>
-                </div>
-              </TD>
-            </TR>
-          ))}
-        </Table>
-        <Pagination page={page} pages={pages} total={filtered.length} perPage={PER} onChange={setPage} />
-      </Card>
 
       {/* Payment detail modal */}
       <Modal open={!!sel && !refundOpen && !walletOpen} onClose={() => setSel(null)} title="Transaction Detail" width={460}>
@@ -154,7 +219,7 @@ export default function PaymentRefund() {
             <InfoRow label="Trip ID"        value={"#" + sel.tripId?.slice(-8).toUpperCase()} />
             <InfoRow label="Customer"       value={sel.customerName ?? "—"} />
             <InfoRow label="Phone"          value={sel.customerPhone ?? "—"} />
-            <InfoRow label="Amount"         value={"₹" + sel.amount.toFixed(2)} color={C.amber} />
+            <InfoRow label="Amount"         value={"₹" + sel.amount.toFixed(2)} color="#f59e0b" />
             <InfoRow label="Method"         value={sel.method?.toUpperCase()} />
             <InfoRow label="Status"         value={<Badge status={sel.status} />} />
             <InfoRow label="Razorpay ID"    value={sel.razorpayPaymentId ?? "—"} />

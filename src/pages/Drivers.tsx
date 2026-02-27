@@ -1,3 +1,21 @@
+/**
+ * FULL-SCREEN LAYOUT OPTIMIZATION
+ * 
+ * This component works with a full-screen app wrapper.
+ * The app root should have:
+ * 
+ * display: "flex"
+ * flexDirection: "column"
+ * minHeight: "100vh"
+ * 
+ * This component's parent container should have:
+ * flex: 1
+ * overflowY: "auto"
+ * overflowX: "hidden"
+ * 
+ * See: FULL_SCREEN_APP_WRAPPER.tsx for the app-level wrapper.
+ */
+
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import axios from "axios";
 import { useAuth } from "../AuthContext";

@@ -358,28 +358,33 @@ export const Input: React.FC<{
 );
 
 // ─── Tabs ─────────────────────────────────────────────────────────────────────
+// Accepts { key } OR { value } so STATUS_OPTS / TYPE_OPTS arrays work directly
+// without renaming — whichever field is present is used as the identifier.
 export const Tabs: React.FC<{
-  tabs: { key: string; label: string; count?: number }[];
+  tabs: ({ key: string; label: string; count?: number } | { value: string; label: string; count?: number })[];
   active: string;
-  onChange: (key: string) => void;
+  onChange: (id: string) => void;
 }> = ({ tabs, active, onChange }) => (
   <div style={{ display: "flex", gap: 4, padding: 4, background: C.surface, borderRadius: 12, border: "1px solid " + C.border, width: "fit-content", flexWrap: "wrap" }}>
-    {tabs.map(t => (
-      <button key={t.key} onClick={() => onChange(t.key)} style={{
-        padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700, fontSize: "0.8rem",
-        background: active === t.key ? C.primary : "transparent",
-        color: active === t.key ? "#fff" : C.muted,
-        transition: "all 0.15s",
-        display: "flex", alignItems: "center", gap: 6,
-      }}>
-        {t.label}
-        {t.count !== undefined && (
-          <span style={{ background: active === t.key ? "rgba(255,255,255,0.2)" : C.border, borderRadius: 20, padding: "0px 7px", fontSize: "0.65rem" }}>
-            {t.count}
-          </span>
-        )}
-      </button>
-    ))}
+    {tabs.map(t => {
+      const id = "key" in t ? t.key : t.value;
+      return (
+        <button key={id} onClick={() => onChange(id)} style={{
+          padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700, fontSize: "0.8rem",
+          background: active === id ? C.primary : "transparent",
+          color: active === id ? "#fff" : C.muted,
+          transition: "all 0.15s",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          {t.label}
+          {t.count !== undefined && (
+            <span style={{ background: active === id ? "rgba(255,255,255,0.2)" : C.border, borderRadius: 20, padding: "0px 7px", fontSize: "0.65rem" }}>
+              {t.count}
+            </span>
+          )}
+        </button>
+      );
+    })}
   </div>
 );
 
