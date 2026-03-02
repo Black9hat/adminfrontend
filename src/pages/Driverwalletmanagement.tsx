@@ -460,28 +460,40 @@ export default function DriverWalletManagement() {
   const [walletData, setWalletData] = useState<Record<string, any>>({});
 
   // ── Fetch wallet data ────────────────────────────────────────────────────
-  useEffect(() => {
-    const fetchWallets = async () => {
-      try {
-        const response = await fetch("/api/admin/wallets", {
-          headers: { "Authorization": `Bearer ${localStorage.getItem("adminToken")}` }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const walletMap: Record<string, any> = {};
-          data.wallets?.forEach((w: any) => {
-            walletMap[w.driverId] = w;
-          });
-          setWalletData(walletMap);
+useEffect(() => {
+  const fetchWallets = async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/admin/wallets`,
+        {
+          headers: {
+            "Authorization": `Bearer ${localStorage.getItem("adminToken")}`,
+            "Content-Type": "application/json"
+          }
         }
-      } catch (err) {
-        console.error("Error fetching wallets:", err);
-      }
-    };
-    if (drivers.length > 0) fetchWallets();
-  }, [drivers]);
+      );
 
-  // ── Calculate stats ──────────────────────────────────────────────────────
+      if (!response.ok) {
+        throw new Error("Failed to fetch wallets");
+      }
+
+      const data = await response.json();
+
+      const walletMap: Record<string, any> = {};
+      data.wallets?.forEach((w: any) => {
+        walletMap[w.driverId] = w;
+      });
+
+      setWalletData(walletMap);
+    } catch (err) {
+      console.error("❌ Error fetching wallets:", err);
+    }
+  };
+
+  if (drivers.length > 0) fetchWallets();
+}, [drivers]);
+
+// ── Calculate stats ──────────────────────────────────────────────────────
   const stats: WalletStats = useMemo(() => {
     let totalBalance = 0;
     let totalEarnings = 0;
