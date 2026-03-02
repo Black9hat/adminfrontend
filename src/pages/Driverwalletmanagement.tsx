@@ -11,6 +11,7 @@ import {
   StatCard, C, Pagination, ConfirmDialog,
 } from "../components/ui";
 import { toast } from "react-toastify";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 const PER = 15;
 
