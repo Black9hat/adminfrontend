@@ -464,10 +464,10 @@ useEffect(() => {
   const fetchWallets = async () => {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/admin/wallets`,
+        `${API_BASE_URL}/api/wallet/admin/wallets`,
         {
           headers: {
-            "Authorization": `Bearer ${localStorage.getItem("adminToken")}`,
+            Authorization: `Bearer ${localStorage.getItem("adminToken")}`,
             "Content-Type": "application/json"
           }
         }
@@ -492,7 +492,6 @@ useEffect(() => {
 
   if (drivers.length > 0) fetchWallets();
 }, [drivers]);
-
 // ── Calculate stats ──────────────────────────────────────────────────────
   const stats: WalletStats = useMemo(() => {
     let totalBalance = 0;
