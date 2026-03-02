@@ -31,17 +31,18 @@ const FarePricing      = lazy(() => import("./pages/FareFraud").then(m => ({ def
 const FraudDetection   = lazy(() => import("./pages/FareFraud").then(m => ({ default: m.FraudDetection })));
 
 // ── New pages ─────────────────────────────────────────────────────────────────
-const FareManagement       = lazy(() => import("./pages/FareManagement"));
-const DriverEarnings       = lazy(() => import("./pages/Driverearningsmanagement"));
-const ServiceAreas         = lazy(() => import("./pages/Serviceareamanagement"));
-const CustomersPage        = lazy(() => import("./pages/Customer"));
-const AdminPromotions      = lazy(() => import("./pages/AdminPromotions"));
-const IncentivesManagement = lazy(() => import("./pages/IncentivesManagement"));
-const AdminSupport         = lazy(() => import("./pages/AdminSupport"));
-const NotificationPage     = lazy(() => import("./pages/Notifications"));
-const HelpManagement       = lazy(() => import("./pages/Helpmanagement"));
-const DocumentsPage        = lazy(() => import("./pages/Documents"));   // ✅ added
-const CouponsManagement    = lazy(() => import("./pages/Couponsmanagement")); // ✅ added
+const FareManagement         = lazy(() => import("./pages/FareManagement"));
+const DriverEarnings         = lazy(() => import("./pages/Driverearningsmanagement"));
+const DriverWalletManagement = lazy(() => import("./pages/Driverwalletmanagement")); // ✅ NEW
+const ServiceAreas           = lazy(() => import("./pages/Serviceareamanagement"));
+const CustomersPage          = lazy(() => import("./pages/Customer"));
+const AdminPromotions        = lazy(() => import("./pages/AdminPromotions"));
+const IncentivesManagement   = lazy(() => import("./pages/IncentivesManagement"));
+const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
+const NotificationPage       = lazy(() => import("./pages/Notifications"));
+const HelpManagement         = lazy(() => import("./pages/Helpmanagement"));
+const DocumentsPage          = lazy(() => import("./pages/Documents"));
+const CouponsManagement      = lazy(() => import("./pages/Couponsmanagement"));
 
 const Loading = () => <Spinner label="Loading page…" />;
 
@@ -72,6 +73,7 @@ export default function AppRoutes() {
           <Route path="/rides"              element={<RideManagement />} />
           <Route path="/drivers"            element={<DriverManagement />} />
           <Route path="/earnings"           element={<DriverEarnings />} />
+          <Route path="/wallets"            element={<DriverWalletManagement />} />
           <Route path="/documents"          element={<DocumentsPage />} />
           <Route path="/parcels"            element={<ParcelManagement />} />
           <Route path="/gps"                element={<GPSMonitoring />} />

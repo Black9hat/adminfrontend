@@ -5,7 +5,7 @@ import {
   Star, Monitor, UserCog, Zap, Search, Scale,
   DollarSign, ChevronDown, ChevronRight, LogOut, Menu,
   Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
-  FileText, Ticket, Activity,
+  FileText, Ticket, Activity, Wallet,
 } from "lucide-react";
 import { C } from "../components/ui";
 
@@ -37,6 +37,7 @@ const GROUPS: NavGroup[] = [
       { path: "/rides",         label: "Ride Management",   icon: <Car size={14} />        },
       { path: "/drivers",       label: "Driver Management", icon: <UserCog size={14} />    },
       { path: "/earnings",      label: "Driver Earnings",   icon: <TrendingUp size={14} /> },
+      { path: "/wallets",       label: "Driver Wallets",    icon: <Wallet size={14} />     }, // ✅ NEW
       { path: "/documents",     label: "Documents",         icon: <FileText size={14} />   },
       { path: "/parcels",       label: "Parcel Delivery",   icon: <Package size={14} />    },
       { path: "/gps",           label: "GPS Monitoring",    icon: <Map size={14} />        },
@@ -98,298 +99,276 @@ export default function AdminLayout() {
   const toggle = (key: string) => setOpen(v => ({ ...v, [key]: !v[key] }));
   const logout = () => { localStorage.removeItem("adminToken"); navigate("/login"); };
 
+  const isActive = (path: string) => location.pathname === path;
+
   return (
-    <div style={{
-      display: "flex", height: "100vh", overflow: "hidden",
-      background: C.bg, fontFamily: "'Inter', -apple-system, sans-serif",
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        @keyframes spin    { to { transform: rotate(360deg); } }
-        @keyframes fadeUp  { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
-        @keyframes fadeIn  { from { opacity:0; } to { opacity:1; } }
-        @keyframes liveDot { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.5);opacity:0.5} }
-        @keyframes pulse   { 0%,100%{opacity:1} 50%{opacity:0.45} }
-
-        ::-webkit-scrollbar       { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: ${C.border3}; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: ${C.muted}; }
-
-        input, select, textarea { font-family: 'Inter', sans-serif; color-scheme: dark; }
-        input::placeholder { color: ${C.muted}; }
-
-        /* Button interactions */
-        .pr-btn { transition: all 0.13s ease; user-select: none; }
-        .pr-btn:hover:not(:disabled) { filter: brightness(1.12); transform: translateY(-1px); }
-        .pr-btn:active:not(:disabled) { transform: translateY(0); filter: brightness(0.96); }
-
-        /* Table row */
-        .pr-row { transition: background 0.08s; cursor: pointer; }
-        .pr-row:hover { background: ${C.surface3} !important; }
-
-        /* Card hover */
-        .pr-card { transition: border-color 0.2s, box-shadow 0.2s; }
-        .pr-card:hover { border-color: ${C.border3} !important; box-shadow: 0 4px 24px rgba(0,0,0,.35); }
-
-        /* Tab */
-        .pr-tab { transition: all 0.13s ease; }
-        .pr-tab:hover:not(.pr-tab-active) { color: ${C.text2} !important; background: ${C.surface3} !important; }
-
-        /* Input focus */
-        .pr-input:focus  { border-color: ${C.primary} !important; outline: none; }
-        .pr-select:focus { border-color: ${C.primary} !important; outline: none; }
-
-        /* Nav link base */
-        .nav-lnk { display: block; text-decoration: none; margin: 1px 5px; }
-        .nav-lnk .nav-in {
-          display: flex; align-items: center; gap: 9px;
-          padding: 7px 9px; border-radius: 7px;
-          border-left: 2px solid transparent;
-          transition: all 0.12s ease;
-        }
-        .nav-lnk:hover .nav-in  { background: ${C.surface3}; }
-        .nav-lnk.active .nav-in {
-          background: ${C.primaryDim};
-          border-left-color: ${C.primary};
-        }
-        .nav-lnk.active .nav-ico { color: ${C.primary} !important; }
-        .nav-lnk.active .nav-txt { color: ${C.primary} !important; font-weight: 700 !important; }
-
-        /* Group header button */
-        .grp-btn {
-          width: 100%; padding: 4px 12px;
-          background: none; border: none; cursor: pointer;
-          display: flex; align-items: center; justify-content: space-between;
-          gap: 6px; margin-top: 6px; transition: background 0.1s;
-          border-radius: 6px;
-        }
-        .grp-btn:hover { background: ${C.surface2}; }
-
-        /* Logout button */
-        .logout-btn {
-          width: 100%; background: none; border: none; cursor: pointer;
-          display: flex; align-items: center; gap: 9px;
-          padding: 7px 9px; color: ${C.muted};
-          font-size: 0.83rem; font-family: 'Inter', sans-serif;
-          border-radius: 7px; transition: all 0.12s;
-        }
-        .logout-btn:hover { color: ${C.red}; background: ${C.redDim}; }
-      `}</style>
-
-      {/* ── SIDEBAR ──────────────────────────────────────────────────────────── */}
-      <aside style={{
-        width: collapsed ? SIDEBAR_MINI : SIDEBAR_FULL,
-        flexShrink: 0,
-        background: C.surface,
-        borderRight: "1px solid " + C.border,
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-        transition: "width 0.2s cubic-bezier(0.4,0,0.2,1)",
-        zIndex: 40,
-        height: "100vh",
-        position: "sticky",
-        top: 0,
-      }}>
-
-        {/* ── Logo / Brand ─────────────────────────────────────────────────── */}
-        <div style={{
-          height: 54,
+    <div style={{ display: "flex", height: "100vh", background: C.surface }}>
+      {/* ── SIDEBAR ─────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          width: collapsed ? SIDEBAR_MINI : SIDEBAR_FULL,
+          height: "100vh",
+          background: C.surface,
+          borderRight: `1px solid ${C.border}`,
+          overflow: "hidden",
+          transition: "width 0.25s",
           display: "flex",
-          alignItems: "center",
-          justifyContent: collapsed ? "center" : "space-between",
-          padding: collapsed ? "0 8px" : "0 10px 0 14px",
-          borderBottom: "1px solid " + C.border,
-          flexShrink: 0,
-          gap: 8,
-        }}>
+          flexDirection: "column",
+          position: "relative",
+        }}
+      >
+        {/* Logo */}
+        <div
+          style={{
+            padding: "1rem",
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+            minHeight: 60,
+          }}
+        >
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#fff",
+              fontWeight: 800,
+              fontSize: "0.9rem",
+            }}
+          >
+            🚗
+          </div>
           {!collapsed && (
-            <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-              <div style={{
-                width: 30, height: 30, borderRadius: 8,
-                background: C.primaryDim, border: "1px solid " + C.primaryBrd,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: "1rem", flexShrink: 0,
-              }}>🚘</div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{
-                  fontWeight: 800, fontSize: "0.92rem", color: C.text,
-                  letterSpacing: "-0.02em", lineHeight: 1,
-                }}>GoIndia</div>
-                <div style={{
-                  fontSize: "0.54rem", color: C.muted,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 2,
-                }}>Admin Center</div>
-              </div>
+            <div
+              style={{
+                fontSize: "0.85rem",
+                fontWeight: 800,
+                color: C.text,
+                whiteSpace: "nowrap",
+              }}
+            >
+              RideHub Admin
             </div>
           )}
-          {collapsed && (
-            <span style={{ fontSize: "1.1rem", flexShrink: 0 }}>🚘</span>
-          )}
-          <button
-            onClick={() => setCol(v => !v)}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: C.muted, padding: 5, borderRadius: 6,
-              display: "flex", alignItems: "center", flexShrink: 0,
-              transition: "color 0.12s",
-            }}
-            onMouseEnter={e => (e.currentTarget.style.color = C.text2)}
-            onMouseLeave={e => (e.currentTarget.style.color = C.muted)}
-          >
-            <Menu size={15} />
-          </button>
         </div>
 
-        {/* ── Live status pill ─────────────────────────────────────────────── */}
-        {!collapsed && (
-          <div style={{
-            margin: "8px 10px 2px",
-            padding: "5px 10px",
-            background: C.greenDim,
-            border: "1px solid " + C.green + "22",
-            borderRadius: 7,
-            display: "flex", alignItems: "center", gap: 7,
-            flexShrink: 0,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: "50%",
-              background: C.green,
-              animation: "liveDot 1.6s ease-in-out infinite",
-              flexShrink: 0, boxShadow: "0 0 5px " + C.green,
-            }} />
-            <span style={{ fontSize: "0.69rem", color: C.green, fontWeight: 600 }}>
-              System Live
-            </span>
-          </div>
-        )}
-
-        {/* ── Nav ──────────────────────────────────────────────────────────── */}
-        <nav style={{
-          flex: 1, overflowY: "auto", overflowX: "hidden",
-          padding: "6px 0 8px",
-        }}>
-          {GROUPS.map(group => (
-            <div key={group.key}>
-
-              {/* Group header */}
+        {/* Nav Groups */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "1rem 0" }}>
+          {GROUPS.map((g) => (
+            <div key={g.key} style={{ marginBottom: "1.5rem" }}>
+              {/* Group Label */}
               {!collapsed && (
                 <button
-                  className="grp-btn"
-                  onClick={() => toggle(group.key)}
+                  onClick={() => toggle(g.key)}
+                  style={{
+                    width: "100%",
+                    padding: "0.5rem 1rem",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    color: C.muted,
+                    fontSize: "0.65rem",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    marginBottom: "0.5rem",
+                    transition: "color 0.2s",
+                  }}
+                  onMouseEnter={(e) => ((e.target as HTMLElement).style.color = C.text)}
+                  onMouseLeave={(e) => ((e.target as HTMLElement).style.color = C.muted)}
                 >
-                  <span style={{
-                    fontSize: "0.58rem", color: C.muted,
-                    fontFamily: "'JetBrains Mono', monospace",
-                    letterSpacing: "0.13em", textTransform: "uppercase",
-                  }}>
-                    {group.label}
-                  </span>
-                  <span style={{ color: C.muted, display: "flex", opacity: 0.6 }}>
-                    {open[group.key] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
-                  </span>
+                  {g.label}
+                  {!collapsed && (
+                    <ChevronRight
+                      size={12}
+                      style={{
+                        transform: open[g.key] ? "rotate(90deg)" : "rotate(0deg)",
+                        transition: "transform 0.2s",
+                      }}
+                    />
+                  )}
                 </button>
               )}
 
-              {/* Nav items */}
-              {(open[group.key] || collapsed) && group.items.map(item => {
-                const isActive =
-                  location.pathname === item.path ||
-                  (item.path !== "/" && location.pathname.startsWith(item.path + "/"));
-                return (
+              {/* Nav Items */}
+              {open[g.key] &&
+                g.items.map((item) => (
                   <NavLink
                     key={item.path}
                     to={item.path}
-                    className={"nav-lnk" + (isActive ? " active" : "")}
-                    title={collapsed ? item.label : undefined}
+                    style={({ isActive: linkActive }) => ({
+                      display: "flex",
+                      alignItems: "center",
+                      gap: collapsed ? 0 : "0.5rem",
+                      padding: "0.65rem 1rem",
+                      margin: "0.2rem 0.5rem",
+                      borderRadius: 6,
+                      textDecoration: "none",
+                      fontSize: "0.8rem",
+                      fontWeight: linkActive ? 600 : 500,
+                      color: linkActive ? C.primary : C.text,
+                      background: linkActive ? `${C.primary}15` : "transparent",
+                      border: linkActive ? `1px solid ${C.primary}33` : "1px solid transparent",
+                      cursor: "pointer",
+                      transition: "all 0.2s",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    })}
                   >
-                    <div
-                      className="nav-in"
-                      style={{
-                        justifyContent: collapsed ? "center" : "flex-start",
-                        padding: collapsed ? "9px 0" : "7px 9px",
-                        gap: collapsed ? 0 : 9,
-                      }}
-                    >
-                      {/* Icon */}
+                    <span style={{ display: "flex", flexShrink: 0, color: "inherit" }}>
+                      {item.icon}
+                    </span>
+                    {!collapsed && <span>{item.label}</span>}
+                    {!collapsed && item.badge && (
                       <span
-                        className="nav-ico"
                         style={{
-                          color: isActive ? C.primary : C.muted,
-                          display: "flex", flexShrink: 0,
-                          transition: "color 0.12s",
+                          marginLeft: "auto",
+                          background: C.red,
+                          color: "#fff",
+                          borderRadius: 999,
+                          padding: "0.1rem 0.45rem",
+                          fontSize: "0.65rem",
+                          fontWeight: 700,
                         }}
                       >
-                        {item.icon}
+                        {item.badge}
                       </span>
-
-                      {/* Label */}
-                      {!collapsed && (
-                        <span
-                          className="nav-txt"
-                          style={{
-                            fontSize: "0.82rem",
-                            fontWeight: isActive ? 600 : 500,
-                            color: isActive ? C.primary : C.text2,
-                            overflow: "hidden", textOverflow: "ellipsis",
-                            whiteSpace: "nowrap", transition: "color 0.12s",
-                          }}
-                        >
-                          {item.label}
-                        </span>
-                      )}
-
-                      {/* Badge */}
-                      {!collapsed && item.badge !== undefined && (
-                        <span style={{
-                          marginLeft: "auto",
-                          background: isActive ? C.primary + "30" : C.border,
-                          color: isActive ? C.primary : C.muted,
-                          borderRadius: 4, padding: "0 5px",
-                          fontSize: "0.6rem", lineHeight: "15px",
-                          fontFamily: "'JetBrains Mono', monospace",
-                          fontWeight: 700, flexShrink: 0,
-                        }}>
-                          {item.badge}
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </NavLink>
-                );
-              })}
+                ))}
             </div>
           ))}
-        </nav>
+        </div>
 
-        {/* ── Logout footer ────────────────────────────────────────────────── */}
-        <div style={{
-          padding: "6px 5px 8px",
-          borderTop: "1px solid " + C.border,
-          flexShrink: 0,
-        }}>
+        {/* Toggle Collapse */}
+        <button
+          onClick={() => setCol(!collapsed)}
+          style={{
+            width: "100%",
+            padding: "1rem",
+            background: `${C.border}`,
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            color: C.muted,
+            transition: "all 0.2s",
+            borderRadius: 0,
+          }}
+          title={collapsed ? "Expand" : "Collapse"}
+        >
+          <Menu size={16} />
+        </button>
+
+        {/* Logout */}
+        {!collapsed && (
           <button
-            className="logout-btn"
             onClick={logout}
             style={{
-              justifyContent: collapsed ? "center" : "flex-start",
-              padding: collapsed ? "8px 0" : "7px 9px",
-              gap: collapsed ? 0 : 9,
+              width: "100%",
+              padding: "0.8rem 1rem",
+              background: `${C.red}15`,
+              border: `1px solid ${C.red}33`,
+              borderRadius: 0,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+              color: C.red,
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              transition: "all 0.2s",
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLElement).style.background = `${C.red}25`;
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLElement).style.background = `${C.red}15`;
             }}
           >
-            <LogOut size={14} style={{ flexShrink: 0 }} />
-            {!collapsed && "Log out"}
+            <LogOut size={14} /> Logout
           </button>
-        </div>
-      </aside>
+        )}
+      </div>
 
-      {/* ── MAIN CONTENT ─────────────────────────────────────────────────────── */}
-      <main style={{ flex: 1, minWidth: 0, overflow: "auto", background: C.bg }}>
-        <Outlet />
-      </main>
+      {/* ── MAIN CONTENT ────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Top Bar */}
+        <div
+          style={{
+            height: 60,
+            background: C.surface,
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            paddingRight: "1.5rem",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            <button
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: C.muted,
+                padding: "0.5rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 6,
+                transition: "all 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.background = C.surface2;
+                (e.currentTarget as HTMLElement).style.color = C.text;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.background = "none";
+                (e.currentTarget as HTMLElement).style.color = C.muted;
+              }}
+            >
+              <Bell size={18} />
+            </button>
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: "50%",
+                background: `linear-gradient(135deg, ${C.primary}, ${C.cyan})`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                fontWeight: 700,
+                fontSize: "0.85rem",
+                cursor: "pointer",
+              }}
+            >
+              A
+            </div>
+          </div>
+        </div>
+
+        {/* Content Area */}
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          <Outlet />
+        </div>
+      </div>
     </div>
   );
 }
