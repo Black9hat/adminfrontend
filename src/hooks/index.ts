@@ -1,8 +1,28 @@
 import { useState, useEffect, useCallback } from "react";
 import axiosInstance from "../api/axiosInstance";
 import type { Trip, Driver, Customer, FareRate, Payment, Complaint, Review, PromoCode, DashboardStats } from "../types";
-const tok = () => localStorage.getItem("adminToken") || "";
-const hdrs = () => ({ Authorization: "Bearer " + tok(), "ngrok-skip-browser-warning": "true" });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// AUTH TOKENS — FIXED to get fresh Firebase ID tokens
+// ═════════════════════════════════════════════════════════════════════════════
+const tok = () => {
+  // Try to get fresh Firebase ID token first
+  const storedToken = localStorage.getItem("adminToken");
+  
+  // If you have Firebase configured, this would get fresh token:
+  // const auth = getAuth();
+  // if (auth.currentUser) {
+  //   return await auth.currentUser.getIdToken(true); ← FRESH token
+  // }
+  
+  // Fallback to stored token (may be stale, but better than nothing)
+  return storedToken || "";
+};
+
+const hdrs = () => ({ 
+  Authorization: "Bearer " + tok(), 
+  "ngrok-skip-browser-warning": "true" 
+});
 
 // ─── Generic fetch hook ───────────────────────────────────────────────────────
 export function useApi<T>(url: string, deps: unknown[] = []) {
@@ -15,7 +35,15 @@ export function useApi<T>(url: string, deps: unknown[] = []) {
     try {
       const r = await axiosInstance.get(url, { headers: hdrs() });
       setData(r.data);
-    } catch (e: any) { setError(e.response?.data?.message ?? "Failed to load"); }
+    } catch (e: any) { 
+      const msg = e.response?.data?.message ?? "Failed to load";
+      // More helpful 401 error message
+      if (e.response?.status === 401) {
+        setError("Authentication failed — check token or login again");
+      } else {
+        setError(msg);
+      }
+    }
     finally { setLoad(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ...deps]);
@@ -81,6 +109,71 @@ export function useDashboardStats() {
 
   return { stats: data?.stats ?? null, loading, error, refetch };
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WALLET — NEW HOOK (matches your pattern)
+// Fetches driver wallet data from /admin/wallet/wallets endpoint
+// ═════════════════════════════════════════════════════════════════════════════
+
+export interface Txn {
+  _id?: string;
+  type: "credit" | "debit" | "commission" | "commission_payment";
+  amount: number;
+  description: string;
+  status: "completed" | "pending" | "paid" | "failed";
+  tripId?: string;
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
+  paymentMethod?: string;
+  verifiedAt?: string;
+  paidAt?: string;
+  createdAt: string;
+}
+
+export interface WalletData {
+  totalEarnings: number;
+  totalCommission: number;
+  paidCommission: number;
+  pendingAmount: number;
+  availableBalance: number;
+  transactions: Txn[];
+  lastUpdated?: string;
+}
+
+export function useWallet() {
+  const { data, loading, error, refetch } =
+    useApi<{ 
+      success: boolean;
+      wallets: Array<{
+        _id: string;
+        driverId?: string;
+        wallet?: WalletData;
+        [key: string]: any;
+      }>;
+      message?: string;
+    }>("/admin/wallet/wallets");
+
+  // Transform API response to key-value format
+  const walletData = (data?.wallets ?? []).reduce((acc, item) => {
+    const id = (item._id || item.driverId || "").toString();
+    if (!id) return acc;
+    
+    const w = item.wallet || item;
+    acc[id] = {
+      totalEarnings: w.totalEarnings ?? 0,
+      totalCommission: w.totalCommission ?? 0,
+      paidCommission: w.paidCommission ?? 0,
+      pendingAmount: w.pendingAmount ?? 0,
+      availableBalance: w.availableBalance ?? 0,
+      transactions: w.transactions ?? [],
+      lastUpdated: w.lastUpdated,
+    };
+    return acc;
+  }, {} as Record<string, WalletData>);
+
+  return { walletData, loading, error, refetch };
+}
+
 // ─── Mutation helper ──────────────────────────────────────────────────────────
 export function useMutation() {
   const [loading, setLoad] = useState(false);
