@@ -141,7 +141,7 @@ function TransactionDetailModal({
   );
 }
 
-// ── DriverWalletCard ─────────────────────────────────────────────────────────
+// ── DriverWalletCard (Change 1: added onExport prop) ─────────────────────────
 function DriverWalletCard({
   driver, wallet, onViewTransactions, onExport,
 }: {
@@ -341,15 +341,14 @@ function DriverWalletCard({
             )}
           </div>
 
-          {/* Actions */}
+          {/* Actions (Change 2: Export button now calls onExport) */}
           <div style={{ display: "flex", gap: 8 }}>
             <div style={{ flex: 1 }}>
               <Btn size="sm" variant="primary" icon={<Wallet size={12} />} onClick={onViewTransactions} full>
                 View All Transactions
               </Btn>
             </div>
-            <Btn size="sm" variant="ghost" icon={<Download size={12} />}
-              onClick={() => onExport()}>
+            <Btn size="sm" variant="ghost" icon={<Download size={12} />} onClick={onExport}>
               Export CSV
             </Btn>
           </div>
@@ -857,56 +856,43 @@ export default function DriverWalletManagement() {
     fetchWallets();
   };
 
-  // ── Export driver wallet as CSV ────────────────────────────────────────
-  const exportDriverCSV = (driver: any, wallet: any) => {
-    const driverName = driver?.name ?? "driver";
-    const rows: string[][] = [];
-
-    // Header
-    rows.push([
-      "Date", "Type", "Description", "Amount (₹)", "Method",
-      "Payment ID (UPI Ref)", "Order ID", "Trip ID", "Status",
-    ]);
-
-    // Data rows — newest first
-    const txns = (wallet?.transactions ?? [])
+  // ── Change 3: Export driver wallet as CSV ──────────────────────────────
+  const exportDriverCSV = (drv: any, wal: any) => {
+    const name = drv?.name ?? "driver";
+    const txns = (wal?.transactions ?? [])
       .slice()
-      .sort((a: any, b: any) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
+      .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    txns.forEach((t: any) => {
-      const prefix = t.type === "credit" ? "+" : "-";
-      rows.push([
+    const esc = (v: any) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [
+      ["Date","Type","Description","Amount (INR)","Method","Payment ID","Order ID","Trip ID","Status"].map(esc).join(","),
+      ...txns.map((t: any) => [
         t.createdAt ? new Date(t.createdAt).toLocaleString("en-IN") : "",
         t.type ?? "",
-        (t.description ?? "").replace(/,/g, " "),
-        prefix + (t.amount ?? 0).toFixed(2),
+        t.description ?? "",
+        (t.type === "credit" ? "+" : "-") + (t.amount ?? 0).toFixed(2),
         t.paymentMethod ?? "",
         t.razorpayPaymentId ?? "",
         t.razorpayOrderId ?? "",
         t.tripId?.toString() ?? "",
         t.status ?? "",
-      ]);
-    });
+      ].map(esc).join(",")),
+      "", `"Total Earnings","Rs ${(wal?.totalEarnings ?? 0).toFixed(2)}"`,
+      `"Commission Paid","Rs ${(wal?.totalCommission ?? 0).toFixed(2)}"`,
+      `"Pending","Rs ${(wal?.pendingAmount ?? 0).toFixed(2)}"`,
+      `"Balance","Rs ${(wal?.availableBalance ?? 0).toFixed(2)}"`,
+    ];
 
-    // Summary footer
-    rows.push([]);
-    rows.push(["Summary"]);
-    rows.push(["Total Earnings", `₹${(wallet?.totalEarnings ?? 0).toFixed(2)}`]);
-    rows.push(["Total Commission Paid", `₹${(wallet?.totalCommission ?? 0).toFixed(2)}`]);
-    rows.push(["Pending Commission", `₹${(wallet?.pendingAmount ?? 0).toFixed(2)}`]);
-    rows.push(["Available Balance", `₹${(wallet?.availableBalance ?? 0).toFixed(2)}`]);
-
-    const csv = rows.map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
     a.href = url;
-    a.download = `wallet_${driverName.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `wallet_${name.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${txns.length} transactions for ${driverName}`);
+    toast.success(`Exported ${txns.length} transactions for ${name}`);
   };
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -1013,7 +999,7 @@ export default function DriverWalletManagement() {
       {/* Loading */}
       {(loading || walletLoading) && <Spinner label="Loading wallets…" />}
 
-      {/* Driver Cards */}
+      {/* Driver Cards (Change 4: onExport passed to DriverWalletCard) */}
       {!loading && !walletLoading && paged.length > 0 ? (
         <div>
           {paged.map((driver: any) => {
