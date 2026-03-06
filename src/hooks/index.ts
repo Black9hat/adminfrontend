@@ -112,7 +112,7 @@ export function useDashboardStats() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // WALLET — NEW HOOK (matches your pattern)
-// Fetches driver wallet data from /admin/wallet/wallets endpoint
+// Fetches driver wallet data from /wallet/admin/wallets endpoint
 // ═════════════════════════════════════════════════════════════════════════════
 
 export interface Txn {
@@ -151,7 +151,7 @@ export function useWallet() {
         [key: string]: any;
       }>;
       message?: string;
-    }>("/admin/wallet/wallets");
+    }>("/wallet/admin/wallets");  // ✅ FIXED: Routes are mounted at /api/wallet, so path is /wallet/admin/wallets
 
   // Transform API response to key-value format
   const walletData = (data?.wallets ?? []).reduce((acc, item) => {
