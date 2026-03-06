@@ -340,7 +340,7 @@ export default function DriverWalletManagement() {
         return;
       }
 
-      const url = `${API_BASE_URL}/api/wallet/admin/wallets`;
+      const url = `${API_BASE_URL}/api/wallet/admin/wallets?limit=500&sortBy=totalEarnings&order=desc`;
       console.log("🔄 Fetching wallets from:", url);
 
       const response = await fetch(url, {
@@ -348,6 +348,7 @@ export default function DriverWalletManagement() {
         headers: {
           "Authorization": `Bearer ${token}`,
           "Content-Type": "application/json",
+          "x-admin-token": token,
         },
       });
 
@@ -381,35 +382,33 @@ export default function DriverWalletManagement() {
       }
 
       // ── Map wallets by driver ID ──────────────────────────────────
+      // After .populate('driverId'), the API returns:
+      // { _id: walletId, driverId: { _id: driverObjectId, name, phone, vehicleType }, ... }
+      // So we must key by item.driverId._id (not item._id which is the wallet's own _id)
       const walletMap: Record<string, any> = {};
 
       if (Array.isArray(data.wallets)) {
         data.wallets.forEach((item: any) => {
-          const driverId = (item._id || item.driverId || "").toString();
+          // driverId is a populated object after populate() — extract its _id
+          const populatedDriver = item.driverId;
+          const driverIdStr = (
+            typeof populatedDriver === "object" && populatedDriver !== null
+              ? populatedDriver._id          // populated object
+              : populatedDriver              // plain string/ObjectId (fallback)
+          )?.toString();
 
-          if (!driverId) return;
+          if (!driverIdStr) return;
 
-          // The API returns: { _id, driverId, wallet: { ... } }
-          if (item.wallet) {
-            walletMap[driverId] = {
-              availableBalance: item.wallet.availableBalance ?? 0,
-              totalEarnings: item.wallet.totalEarnings ?? 0,
-              totalCommission: item.wallet.totalCommission ?? 0,
-              pendingAmount: item.wallet.pendingAmount ?? 0,
-              transactions: item.wallet.transactions ?? [],
-              lastUpdated: item.wallet.lastUpdated,
-            };
-          } else {
-            // Fallback: flat structure
-            walletMap[driverId] = {
-              availableBalance: item.availableBalance ?? 0,
-              totalEarnings: item.totalEarnings ?? 0,
-              totalCommission: item.totalCommission ?? 0,
-              pendingAmount: item.pendingAmount ?? 0,
-              transactions: item.transactions ?? [],
-              lastUpdated: item.lastUpdated,
-            };
-          }
+          walletMap[driverIdStr] = {
+            availableBalance: item.availableBalance ?? 0,
+            totalEarnings:    item.totalEarnings    ?? 0,
+            totalCommission:  item.totalCommission  ?? 0,
+            pendingAmount:    item.pendingAmount     ?? 0,
+            transactions:     item.transactions     ?? [],
+            lastUpdated:      item.lastUpdated,
+            // Keep populated driver info for display use
+            driverInfo: typeof populatedDriver === "object" ? populatedDriver : null,
+          };
         });
       }
 
