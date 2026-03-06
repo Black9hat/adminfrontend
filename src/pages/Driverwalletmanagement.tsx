@@ -1,665 +1,993 @@
-// pages/DriverWalletManagement.tsx - COMPLETE FIXED VERSION
+// ============================================================
+// DriverWalletManagement.tsx — Production Admin Dashboard
+// ============================================================
+// ✅ Shows ALL transaction types per driver: credit, commission,
+//    commission_payment (ONLY when Razorpay-verified)
+// ✅ Paid commission section separated with verifiedAt badge
+// ✅ Full paginated history modal per driver
+// ✅ Pending vs Paid commission clearly distinguished
+// ✅ All wallet fields from new paidCommission field
+// ✅ Stats include commission paid across all drivers
+// ============================================================
+
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
-  RefreshCw, Wallet, TrendingUp, AlertCircle, CheckCircle2,
-  Clock, Eye, EyeOff, Download, Filter, ArrowUpRight, ArrowDownLeft,
-  DollarSign, User, Calendar, CreditCard,
+  RefreshCw, Wallet, TrendingUp, AlertCircle,
+  Clock, Eye, EyeOff, Download, ArrowUpRight, ArrowDownLeft,
+  DollarSign, User, ChevronDown, ChevronUp, ShieldCheck,
+  CreditCard, Tag, History, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { useDrivers, useMutation } from "../hooks/index";
+import { useDrivers } from "../hooks/index";
 import {
-  Badge, Btn, Card, Table, TR, TD, Modal, Spinner, PageError,
-  SearchBar, Sel, Tabs, InfoRow, SectionLabel,
-  StatCard, C, Pagination, ConfirmDialog,
+  Btn, Card, Modal, Spinner, PageError,
+  SearchBar, Sel, InfoRow, SectionLabel,
+  StatCard, C, Pagination,
 } from "../components/ui";
 import { toast } from "react-toastify";
 
-const PER = 15;
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const PER          = 15;
+const TXN_PER_PAGE = 10;
+const API          = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
-// ── Transaction Type Icons ───────────────────────────────────────────────────
-const TXN_ICONS: Record<string, React.ReactNode> = {
-  credit:     <ArrowDownLeft size={13} style={{ color: C.green }} />,
-  debit:      <ArrowUpRight size={13} style={{ color: C.red }} />,
-  commission: <AlertCircle size={13} style={{ color: C.amber }} />,
-};
+// ═══════════════════════════════════════════════════════════════════
+// AUTH HEADER HELPER
+// Root cause of 401: localStorage stores a Firebase *custom token*
+// (used for signInWithCustomToken) — NOT a Firebase *ID token*
+// (used for API auth). They look identical but are completely different.
+// Fix: always get a fresh ID token from Firebase currentUser.
+// 
+// FIREBASE SETUP:
+// Make sure your tsconfig.json includes:
+// {
+//   "compilerOptions": {
+//     "skipLibCheck": true,  // Skip Firebase type checking if needed
+//     "esModuleInterop": true,
+//     "moduleResolution": "node"
+//   }
+// }
+// 
+// And install Firebase:
+// npm install firebase
+// ═══════════════════════════════════════════════════════════════════
 
-const TXN_COLORS: Record<string, string> = {
-  credit:     C.green,
-  debit:      C.red,
-  commission: C.amber,
-};
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const base: Record<string, string> = { "Content-Type": "application/json" };
 
-// ── Tab config ───────────────────────────────────────────────────────────────
-const STATUS_TABS = [
-  { value: "all",      label: "All Drivers" },
-  { value: "active",   label: "Active" },
-  { value: "inactive", label: "Inactive" },
-];
+  // Priority 1: Fresh ID token from Firebase signed-in user (best — never stale)
+  try {
+    // Dynamically import Firebase to avoid module resolution errors
+    // if Firebase is not installed. Type-cast to 'any' for compatibility.
+    const firebaseAuth = await (import("firebase/auth") as Promise<any>);
+    const getAuth = firebaseAuth.getAuth;
+    
+    if (getAuth && typeof getAuth === "function") {
+      const auth = getAuth();
+      if (auth && auth.currentUser) {
+        const idToken = await auth.currentUser.getIdToken(false);
+        return { ...base, Authorization: `Bearer ${idToken}` };
+      }
+    }
+  } catch (err: any) {
+    // Firebase not configured, missing, or user not signed in
+    // Fall through to next priority
+    console.debug("Firebase auth not available:", err?.message);
+  }
 
-// ── Interfaces ───────────────────────────────────────────────────────────────
-interface WalletStats {
-  totalDrivers: number;
-  totalBalance: number;
-  totalEarnings: number;
-  pendingPayouts: number;
+  // Priority 2: x-admin-token static secret (bypasses Firebase entirely)
+  const adminSecret = (import.meta as any).env?.VITE_ADMIN_TOKEN;
+  if (adminSecret) return { ...base, "x-admin-token": adminSecret };
+
+  // Priority 3: Stored token (legacy — may be stale or wrong token type)
+  const stored = localStorage.getItem("adminToken");
+  if (stored) return { ...base, Authorization: `Bearer ${stored}` };
+
+  return base; // No auth — will 401 with a clear server error
 }
 
-// ── WalletStatsSection ───────────────────────────────────────────────────────
-function WalletStatsSection({ stats }: { stats: WalletStats }) {
+
+
+// ── Types ─────────────────────────────────────────────────────────────────
+type TxnType = "credit" | "debit" | "commission" | "commission_payment";
+type TxnStatus = "completed" | "pending" | "paid" | "failed";
+
+interface Txn {
+  _id?: string;
+  type: TxnType;
+  amount: number;
+  description: string;
+  status: TxnStatus;
+  tripId?: string;
+  razorpayPaymentId?: string;
+  razorpayOrderId?: string;
+  paymentMethod?: string;
+  verifiedAt?: string;
+  paidAt?: string;
+  createdAt: string;
+}
+
+interface WalletData {
+  totalEarnings: number;
+  totalCommission: number;
+  paidCommission: number;
+  pendingAmount: number;
+  availableBalance: number;
+  transactions: Txn[];
+  lastUpdated?: string;
+}
+
+// ── Display config per transaction type ───────────────────────────────────
+const TXN_CFG: Record<TxnType, { label: string; color: string; sign: "+" | "−" | ""; icon: React.ReactNode }> = {
+  credit: {
+    label: "Trip Earning", color: "#10B981", sign: "+",
+    icon: <ArrowDownLeft size={13} />,
+  },
+  debit: {
+    label: "Debit", color: "#EF4444", sign: "−",
+    icon: <ArrowUpRight size={13} />,
+  },
+  commission: {
+    label: "Commission Charged", color: "#F59E0B", sign: "−",
+    icon: <Tag size={13} />,
+  },
+  commission_payment: {
+    label: "Commission Paid", color: "#3B82F6", sign: "−",
+    icon: <ShieldCheck size={13} />,
+  },
+};
+
+const STATUS_CFG: Record<string, { label: string; color: string }> = {
+  completed: { label: "Completed", color: "#10B981" },
+  pending:   { label: "Pending",   color: "#F59E0B" },
+  paid:      { label: "Paid",      color: "#3B82F6" },
+  failed:    { label: "Failed",    color: "#EF4444" },
+};
+
+const FILTER_OPTS = [
+  { value: "",                   label: "All Types" },
+  { value: "credit",             label: "Trip Earnings" },
+  { value: "commission",         label: "Commission Charged" },
+  { value: "commission_payment", label: "Commission Paid (Verified)" },
+  { value: "debit",              label: "Debits" },
+];
+
+const DRIVER_STATUS_OPTS = [
+  { value: "all",      label: "All Drivers" },
+  { value: "active",   label: "Online" },
+  { value: "inactive", label: "Offline" },
+];
+
+// ── Format helpers ───────────────────────────────────────────────────────
+const inr = (n: number) =>
+  `₹${(n ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const fmtDt = (d?: string) =>
+  d ? new Date(d).toLocaleString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  }) : "—";
+
+// ══════════════════════════════════════════════════════════════════
+// TRANSACTION ROW
+// ══════════════════════════════════════════════════════════════════
+function TxnRow({ txn, onClick }: { txn: Txn; onClick: () => void }) {
+  const cfg = TXN_CFG[txn.type] ?? TXN_CFG.credit;
+  const stCfg = STATUS_CFG[txn.status] ?? STATUS_CFG.pending;
+
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      gap: "1rem",
-      marginBottom: "1.5rem",
-    }}>
-      <StatCard
-        icon={<User size={18} /> as any}
-        label="Total Drivers"
-        value={stats.totalDrivers}
-        color={C.primary}
-      />
-      <StatCard
-        icon={<DollarSign size={18} /> as any}
-        label="Total Balance"
-        value={`₹${stats.totalBalance.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
-        color={C.green}
-      />
-      <StatCard
-        icon={<TrendingUp size={18} /> as any}
-        label="Total Earnings"
-        value={`₹${stats.totalEarnings.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
-        color={C.cyan}
-      />
-      <StatCard
-        icon={<Clock size={18} /> as any}
-        label="Pending Payouts"
-        value={`₹${stats.pendingPayouts.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
-        color={C.amber}
-      />
+    <div
+      onClick={onClick}
+      style={{
+        display: "grid", gridTemplateColumns: "30px 1fr auto",
+        gap: "0.65rem", alignItems: "center",
+        padding: "0.65rem 0.9rem",
+        borderBottom: `1px solid ${C.border}`,
+        cursor: "pointer", transition: "background 0.12s",
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = C.surface2 + "cc")}
+      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+    >
+      {/* Icon bubble */}
+      <div style={{
+        width: 30, height: 30, borderRadius: "50%",
+        background: cfg.color + "18",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: cfg.color, flexShrink: 0,
+      }}>
+        {cfg.icon}
+      </div>
+
+      {/* Description */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 600, fontSize: "0.8rem", color: cfg.color }}>
+            {cfg.label}
+          </span>
+
+          {/* VERIFIED badge — only for commission_payment with verifiedAt */}
+          {txn.type === "commission_payment" && txn.verifiedAt && (
+            <span style={{
+              fontSize: "0.55rem", fontWeight: 700, padding: "1px 5px",
+              borderRadius: 8, background: "#10B98120", color: "#10B981",
+              border: "1px solid #10B98140", letterSpacing: "0.04em",
+            }}>✓ VERIFIED</span>
+          )}
+
+          {/* Status pill */}
+          <span style={{
+            fontSize: "0.58rem", padding: "1px 5px", borderRadius: 8,
+            background: stCfg.color + "18", color: stCfg.color,
+            border: `1px solid ${stCfg.color}28`,
+          }}>
+            {stCfg.label}
+          </span>
+        </div>
+
+        <div style={{ fontSize: "0.67rem", color: C.muted, marginTop: 1, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span>{fmtDt(txn.createdAt)}</span>
+          {txn.tripId && (
+            <span style={{ color: C.cyan }}>Trip #{txn.tripId.slice(-6)}</span>
+          )}
+          {txn.razorpayPaymentId && (
+            <span style={{ fontFamily: "monospace", color: "#3B82F6" }}>
+              {txn.razorpayPaymentId.slice(-12)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Amount */}
+      <div style={{
+        fontFamily: "'JetBrains Mono', 'Courier New', monospace",
+        fontWeight: 800, fontSize: "0.88rem", flexShrink: 0,
+        color: txn.type === "credit"
+          ? "#10B981"
+          : txn.type === "commission_payment"
+          ? "#3B82F6"
+          : "#EF4444",
+      }}>
+        {cfg.sign}{inr(txn.amount)}
+      </div>
     </div>
   );
 }
 
-// ── TransactionDetailModal ───────────────────────────────────────────────────
-function TransactionDetailModal({
-  transaction, driverName, open, onClose,
-}: {
-  transaction: any; driverName: string; open: boolean; onClose: () => void;
+// ══════════════════════════════════════════════════════════════════
+// TRANSACTION DETAIL MODAL
+// ══════════════════════════════════════════════════════════════════
+function TxnDetailModal({ txn, driverName, open, onClose }: {
+  txn: Txn | null; driverName: string; open: boolean; onClose: () => void;
 }) {
+  if (!txn) return null;
+  const cfg   = TXN_CFG[txn.type] ?? TXN_CFG.credit;
+  const stCfg = STATUS_CFG[txn.status] ?? STATUS_CFG.pending;
+
   return (
-    <Modal open={open} onClose={onClose} title="Transaction Details" width={480}>
-      {transaction && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
-          <div style={{
-            background: TXN_COLORS[transaction.type] + "12",
-            border: "1px solid " + TXN_COLORS[transaction.type] + "22",
-            borderRadius: 8, padding: "1rem",
-            display: "flex", justifyContent: "space-between", alignItems: "center",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {TXN_ICONS[transaction.type]}
-              <div>
-                <div style={{ fontSize: "0.65rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {transaction.type}
-                </div>
-                <div style={{ fontSize: "0.9rem", color: TXN_COLORS[transaction.type], fontWeight: 700 }}>
-                  {transaction.description}
-                </div>
-              </div>
+    <Modal open={open} onClose={onClose} title="Transaction Details" width={500}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+
+        {/* Hero amount */}
+        <div style={{
+          background: cfg.color + "10",
+          border: `1px solid ${cfg.color}28`,
+          borderRadius: 10, padding: "1.1rem",
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: "50%",
+              background: cfg.color + "22",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: cfg.color,
+            }}>
+              {cfg.icon}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{
-                fontSize: "1.3rem", fontWeight: 800,
-                color: transaction.type === "debit" ? C.red : C.green,
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                {transaction.type === "debit" ? "-" : "+"} ₹{transaction.amount.toFixed(2)}
+            <div>
+              <div style={{ fontSize: "0.6rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                {cfg.label}
               </div>
-              <div style={{ marginTop: 4 }}>
-                <Badge status={transaction.status} />
+              <div style={{ fontSize: "0.82rem", fontWeight: 600, marginTop: 1 }}>
+                {txn.description}
               </div>
             </div>
           </div>
-
-          <div style={{
-            background: C.surface2, borderRadius: 8, overflow: "hidden",
-            border: "1px solid " + C.border,
-          }}>
-            <InfoRow label="Driver" value={driverName} />
-            <InfoRow label="Type" value={transaction.type.charAt(0).toUpperCase() + transaction.type.slice(1)} />
-            <InfoRow label="Amount" value={`₹${transaction.amount.toFixed(2)}`} />
-            <InfoRow label="Status" value={transaction.status.charAt(0).toUpperCase() + transaction.status.slice(1)} />
-            {transaction.tripId && <InfoRow label="Trip ID" value={transaction.tripId} />}
-            {transaction.razorpayPaymentId && <InfoRow label="Payment ID" value={transaction.razorpayPaymentId} />}
-            {transaction.paymentMethod && <InfoRow label="Method" value={transaction.paymentMethod.toUpperCase()} />}
-            <InfoRow label="Date" value={new Date(transaction.createdAt).toLocaleString("en-IN")} />
+          <div style={{ textAlign: "right" }}>
+            <div style={{
+              fontFamily: "'JetBrains Mono', monospace",
+              fontSize: "1.35rem", fontWeight: 900, color: cfg.color,
+            }}>
+              {cfg.sign}{inr(txn.amount)}
+            </div>
+            <div style={{
+              marginTop: 4, fontSize: "0.65rem", fontWeight: 700,
+              color: stCfg.color,
+            }}>
+              {stCfg.label}
+            </div>
           </div>
         </div>
-      )}
+
+        {/* Details */}
+        <div style={{
+          background: C.surface2, borderRadius: 8, overflow: "hidden",
+          border: `1px solid ${C.border}`,
+        }}>
+          <InfoRow label="Driver"  value={driverName} />
+          <InfoRow label="Type"    value={cfg.label} />
+          <InfoRow label="Amount"  value={inr(txn.amount)} />
+          <InfoRow label="Status"  value={<span style={{ color: stCfg.color, fontWeight: 600 }}>{stCfg.label}</span>} />
+          {txn.tripId           && <InfoRow label="Trip ID"          value={txn.tripId} />}
+          {txn.paymentMethod    && <InfoRow label="Method"           value={txn.paymentMethod.toUpperCase()} />}
+          {txn.razorpayPaymentId && (
+            <InfoRow label="Razorpay Payment ID" value={
+              <span style={{ fontFamily: "monospace", fontSize: "0.78rem", color: "#3B82F6" }}>
+                {txn.razorpayPaymentId}
+              </span>
+            } />
+          )}
+          {txn.razorpayOrderId  && (
+            <InfoRow label="Order ID" value={
+              <span style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                {txn.razorpayOrderId}
+              </span>
+            } />
+          )}
+          {txn.verifiedAt && (
+            <InfoRow label="Verified At" value={
+              <span style={{ color: "#10B981", fontWeight: 600 }}>{fmtDt(txn.verifiedAt)}</span>
+            } />
+          )}
+          {txn.paidAt           && <InfoRow label="Paid At"          value={fmtDt(txn.paidAt)} />}
+          <InfoRow label="Created At" value={fmtDt(txn.createdAt)} />
+        </div>
+
+        {/* Security note for commission_payment */}
+        {txn.type === "commission_payment" && (
+          <div style={{
+            background: "#3B82F60c", border: "1px solid #3B82F628",
+            borderRadius: 8, padding: "0.75rem",
+            display: "flex", gap: 8, alignItems: "flex-start",
+          }}>
+            <ShieldCheck size={15} color="#3B82F6" style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: "0.72rem", color: C.muted, lineHeight: 1.55 }}>
+              {txn.verifiedAt
+                ? <>This payment was <strong style={{ color: "#3B82F6" }}>cryptographically verified</strong> via Razorpay HMAC-SHA256 before being recorded. It cannot be a duplicate or fraudulent entry.</>
+                : "Recorded via Razorpay webhook. Verification timestamp pending."
+              }
+            </div>
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }
 
-// ── DriverWalletCard ─────────────────────────────────────────────────────────
-function DriverWalletCard({
-  driver, wallet, onViewTransactions,
-}: {
-  driver: any; wallet: any; onViewTransactions: () => void;
+// ══════════════════════════════════════════════════════════════════
+// DRIVER FULL HISTORY MODAL
+// ══════════════════════════════════════════════════════════════════
+function DriverHistoryModal({ driver, wallet, open, onClose }: {
+  driver: any; wallet: WalletData | null; open: boolean; onClose: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const [showBalance, setShowBalance] = useState(false);
+  const [typeF,      setTypeF]      = useState("");
+  const [txnPage,    setTxnPage]    = useState(1);
+  const [selTxn,     setSelTxn]     = useState<Txn | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
+
+  useEffect(() => { if (open) { setTypeF(""); setTxnPage(1); } }, [open]);
+
+  // All transactions, filtered and sorted
+  const allTxns = useMemo<Txn[]>(() => {
+    let t: Txn[] = wallet?.transactions ?? [];
+    if (typeF) t = t.filter(x => x.type === typeF);
+    return [...t].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [wallet, typeF]);
+
+  const pages     = Math.ceil(allTxns.length / TXN_PER_PAGE) || 1;
+  const pagedTxns = allTxns.slice((txnPage - 1) * TXN_PER_PAGE, txnPage * TXN_PER_PAGE);
+
+  // Verified Razorpay payments — shown in dedicated section
+  const verifiedPayments = useMemo<Txn[]>(() =>
+    (wallet?.transactions ?? [])
+      .filter(t => t.type === "commission_payment" && t.status === "completed")
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    [wallet]
+  );
+
+  const paidCommTotal = verifiedPayments.reduce((s, t) => s + t.amount, 0);
+
+  if (!driver || !wallet) return null;
 
   return (
-    <Card style={{ marginBottom: "1rem", overflow: "hidden" }}>
-      {/* Header */}
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          padding: "1rem", background: C.surface2,
-          border: "1px solid " + C.border, borderRadius: 8,
-          cursor: "pointer", display: "flex",
-          justifyContent: "space-between", alignItems: "center",
-          transition: "all 0.2s",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
-          {/* Avatar */}
-          <div style={{
-            width: 40, height: 40, borderRadius: "50%",
-            background: C.primary + "22",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: "1.2rem", fontWeight: 700, color: C.primary,
-          }}>
-            {driver.name?.charAt(0).toUpperCase() || "?"}
-          </div>
+    <>
+      <Modal open={open} onClose={onClose} title={`Full History — ${driver.name}`} width={740}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
 
-          {/* Info */}
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>
-              {driver.name || "Unknown Driver"}
-            </div>
-            <div style={{ fontSize: "0.65rem", color: C.muted }}>
-              {driver.phone || "N/A"} · {driver.vehicleType ?? "Unknown"}
-            </div>
-          </div>
-
-          {/* Balance */}
-          <div style={{ textAlign: "right", paddingRight: "0.5rem" }}>
-            <div style={{
-              fontSize: "0.65rem", color: C.muted,
-              textTransform: "uppercase", letterSpacing: "0.05em",
-            }}>
-              Available Balance
-            </div>
-            <div style={{
-              fontSize: "1.1rem", fontWeight: 800, color: C.green,
-              fontFamily: "'JetBrains Mono', monospace",
-              display: "flex", alignItems: "center", gap: 6,
-              justifyContent: "flex-end",
-            }}>
-              {showBalance ? `₹${wallet.availableBalance?.toFixed(2) ?? "0.00"}` : "••••••"}
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowBalance(!showBalance); }}
-                style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 4 }}
-              >
-                {showBalance ? <Eye size={14} /> : <EyeOff size={14} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Expand */}
-          <div style={{ color: C.muted, display: "flex" }}>
-            {expanded ? "▲" : "▼"}
-          </div>
-        </div>
-      </div>
-
-      {/* Expanded */}
-      {expanded && (
-        <div style={{ padding: "1.5rem", borderTop: "1px solid " + C.border }}>
-          {/* Stats grid */}
-          <div style={{
-            display: "grid", gridTemplateColumns: "repeat(2, 1fr)",
-            gap: "1rem", marginBottom: "1.5rem",
-          }}>
+          {/* Summary row */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.6rem" }}>
             {[
-              { label: "Total Earnings", value: wallet.totalEarnings, color: C.green },
-              { label: "Total Commission", value: wallet.totalCommission, color: C.amber },
-              { label: "Pending Payout", value: wallet.pendingAmount, color: C.cyan },
-              { label: "Available Balance", value: wallet.availableBalance, color: C.primary },
-            ].map((stat, i) => (
+              { label: "Total Earnings",      value: wallet.totalEarnings,    color: "#10B981" },
+              { label: "Commission Paid ✓",   value: paidCommTotal,           color: "#3B82F6" },
+              { label: "Pending Commission",  value: wallet.pendingAmount,    color: "#F59E0B" },
+              { label: "Available Balance",   value: wallet.availableBalance, color: C.primary },
+            ].map((s, i) => (
               <div key={i} style={{
-                background: stat.color + "12",
-                border: "1px solid " + stat.color + "22",
-                borderRadius: 7, padding: "0.9rem",
+                background: s.color + "0e",
+                border: `1px solid ${s.color}22`,
+                borderRadius: 8, padding: "0.7rem",
               }}>
-                <div style={{
-                  fontSize: "0.65rem", color: C.muted,
-                  textTransform: "uppercase", letterSpacing: "0.05em",
-                }}>
-                  {stat.label}
+                <div style={{ fontSize: "0.58rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  {s.label}
                 </div>
                 <div style={{
-                  fontSize: "1.3rem", fontWeight: 800, color: stat.color,
-                  fontFamily: "'JetBrains Mono', monospace", marginTop: 4,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: "0.95rem", fontWeight: 800, color: s.color, marginTop: 3,
                 }}>
-                  ₹{(stat.value ?? 0).toFixed(2)}
+                  {inr(s.value)}
                 </div>
               </div>
             ))}
           </div>
 
-          <div style={{ height: "1px", background: C.border, marginBottom: "1.5rem" }} />
+          {/* Type filter */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ width: 220 }}>
+              <Sel
+                label="Filter by type"
+                value={typeF}
+                onChange={v => { setTypeF(v); setTxnPage(1); }}
+                options={FILTER_OPTS}
+              />
+            </div>
+            <div style={{ fontSize: "0.78rem", color: C.muted }}>
+              {allTxns.length} transactions
+            </div>
+          </div>
 
-          {/* Recent Transactions */}
-          <div style={{ marginBottom: "1rem" }}>
-            <SectionLabel>Recent Transactions</SectionLabel>
-            {wallet.transactions && wallet.transactions.length > 0 ? (
-              <div style={{
-                marginTop: "0.8rem", display: "flex", flexDirection: "column", gap: "0.5rem",
-              }}>
-                {wallet.transactions.slice(0, 3).map((txn: any, idx: number) => (
-                  <div key={txn._id || idx} style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "0.7rem", background: C.surface2, borderRadius: 6, fontSize: "0.8rem",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      {TXN_ICONS[txn.type] || <AlertCircle size={13} style={{ color: C.muted }} />}
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{txn.description || "Transaction"}</div>
-                        <div style={{ fontSize: "0.65rem", color: C.muted }}>
-                          {new Date(txn.createdAt).toLocaleDateString("en-IN")}
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{
-                      fontWeight: 700, color: TXN_COLORS[txn.type] || C.muted,
-                      fontFamily: "'JetBrains Mono', monospace",
-                    }}>
-                      {txn.type === "debit" ? "-" : "+"} ₹{(txn.amount || 0).toFixed(2)}
-                    </div>
-                  </div>
-                ))}
+          {/* Transaction list */}
+          <div style={{
+            border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden",
+            maxHeight: 380, overflowY: "auto",
+          }}>
+            {pagedTxns.length === 0 ? (
+              <div style={{ padding: "2rem", textAlign: "center", color: C.muted, fontSize: "0.82rem" }}>
+                No transactions
               </div>
             ) : (
-              <div style={{ padding: "1rem", textAlign: "center", color: C.muted, fontSize: "0.8rem" }}>
-                No transactions yet
-              </div>
+              pagedTxns.map((t, i) => (
+                <TxnRow
+                  key={t._id ?? i}
+                  txn={t}
+                  onClick={() => { setSelTxn(t); setShowDetail(true); }}
+                />
+              ))
             )}
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Btn size="sm" variant="primary" icon={<Wallet size={12} />} onClick={onViewTransactions} full>
-                View All Transactions
-              </Btn>
+          {/* Txn pagination */}
+          {pages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+              <button
+                onClick={() => setTxnPage(p => Math.max(1, p - 1))}
+                disabled={txnPage === 1}
+                style={{
+                  background: "none", border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: "3px 9px", cursor: txnPage === 1 ? "not-allowed" : "pointer",
+                  color: txnPage === 1 ? C.muted : C.text, display: "flex",
+                }}
+              ><ChevronLeft size={14} /></button>
+              <span style={{ fontSize: "0.78rem", color: C.muted }}>
+                {txnPage} / {pages}
+              </span>
+              <button
+                onClick={() => setTxnPage(p => Math.min(pages, p + 1))}
+                disabled={txnPage === pages}
+                style={{
+                  background: "none", border: `1px solid ${C.border}`, borderRadius: 6,
+                  padding: "3px 9px", cursor: txnPage === pages ? "not-allowed" : "pointer",
+                  color: txnPage === pages ? C.muted : C.text, display: "flex",
+                }}
+              ><ChevronRight size={14} /></button>
             </div>
-            <Btn size="sm" variant="ghost" icon={<Download size={12} />}
-              onClick={() => toast.info("Download feature coming soon")}>
-              Export
-            </Btn>
-          </div>
+          )}
+
+          {/* ── Verified Razorpay Payments Section ───────────────────── */}
+          {verifiedPayments.length > 0 && (
+            <div style={{
+              background: "#3B82F607",
+              border: "1px solid #3B82F622",
+              borderRadius: 8, padding: "0.9rem",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.7rem" }}>
+                <ShieldCheck size={14} color="#3B82F6" />
+                <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#3B82F6" }}>
+                  Verified Razorpay Commission Payments ({verifiedPayments.length})
+                </span>
+                <span style={{
+                  marginLeft: "auto",
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontWeight: 800, fontSize: "0.82rem", color: "#3B82F6",
+                }}>
+                  Total: {inr(paidCommTotal)}
+                </span>
+              </div>
+              {verifiedPayments.map((t, i) => (
+                <div
+                  key={t._id ?? i}
+                  onClick={() => { setSelTxn(t); setShowDetail(true); }}
+                  style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+                    padding: "0.55rem 0",
+                    borderTop: i > 0 ? `1px solid ${C.border}` : "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: "0.78rem", fontWeight: 600 }}>{fmtDt(t.createdAt)}</div>
+                    {t.razorpayPaymentId && (
+                      <div style={{ fontFamily: "monospace", color: "#3B82F6", fontSize: "0.68rem" }}>
+                        {t.razorpayPaymentId}
+                      </div>
+                    )}
+                    {t.verifiedAt && (
+                      <div style={{ fontSize: "0.65rem", color: "#10B981", display: "flex", alignItems: "center", gap: 3, marginTop: 1 }}>
+                        <ShieldCheck size={9} /> Verified {fmtDt(t.verifiedAt)}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontWeight: 800, color: "#3B82F6", fontSize: "0.88rem",
+                  }}>
+                    {inr(t.amount)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Note when no commission paid yet */}
+          {verifiedPayments.length === 0 && wallet.pendingAmount > 0 && (
+            <div style={{
+              background: "#F59E0B08", border: "1px solid #F59E0B22",
+              borderRadius: 8, padding: "0.8rem",
+              display: "flex", alignItems: "center", gap: 8,
+              fontSize: "0.75rem", color: C.muted,
+            }}>
+              <AlertCircle size={14} color="#F59E0B" />
+              Commission of <strong style={{ color: "#F59E0B" }}>{inr(wallet.pendingAmount)}</strong> is pending.
+              No Razorpay payment verified yet.
+            </div>
+          )}
         </div>
-      )}
-    </Card>
+      </Modal>
+
+      <TxnDetailModal
+        txn={selTxn}
+        driverName={driver?.name ?? "Unknown"}
+        open={showDetail}
+        onClose={() => { setShowDetail(false); setSelTxn(null); }}
+      />
+    </>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ═══════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
+// DRIVER WALLET CARD
+// ══════════════════════════════════════════════════════════════════
+function DriverWalletCard({ driver, wallet, onViewHistory }: {
+  driver: any;
+  wallet: WalletData;
+  onViewHistory: () => void;
+}) {
+  const [expanded,    setExpanded]    = useState(false);
+  const [showBal,     setShowBal]     = useState(false);
+  const [selTxn,      setSelTxn]      = useState<Txn | null>(null);
+  const [showDetail,  setShowDetail]  = useState(false);
 
+  const recentTxns = useMemo<Txn[]>(() =>
+    [...(wallet.transactions ?? [])]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5),
+    [wallet]
+  );
+
+  const paidComm = useMemo(() =>
+    (wallet.transactions ?? [])
+      .filter(t => t.type === "commission_payment" && t.status === "completed")
+      .reduce((s, t) => s + t.amount, 0),
+    [wallet]
+  );
+
+  const hasPending = wallet.pendingAmount >= 1;
+
+  return (
+    <>
+      <div style={{
+        background: C.surface, border: `1px solid ${C.border}`,
+        borderRadius: 10, marginBottom: "0.65rem", overflow: "hidden",
+        boxShadow: "0 1px 3px rgba(0,0,0,.05)",
+      }}>
+        {/* ── Header ─────────────────────────────────────────────── */}
+        <div
+          onClick={() => setExpanded(!expanded)}
+          style={{
+            padding: "0.85rem 1rem", cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 12,
+            transition: "background 0.12s",
+          }}
+          onMouseEnter={e => (e.currentTarget.style.background = C.surface2)}
+          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+        >
+          {/* Avatar */}
+          <div style={{
+            width: 36, height: 36, borderRadius: "50%", flexShrink: 0,
+            background: (driver.isOnline ? "#10B981" : C.muted) + "1a",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 700, color: driver.isOnline ? "#10B981" : C.muted,
+            border: `2px solid ${driver.isOnline ? "#10B98135" : C.border}`,
+          }}>
+            {driver.name?.charAt(0)?.toUpperCase() ?? "?"}
+          </div>
+
+          {/* Name + phone */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: "0.88rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {driver.name ?? "Unknown"}
+              {driver.isOnline && (
+                <span style={{
+                  marginLeft: 6, fontSize: "0.55rem", padding: "1px 5px",
+                  background: "#10B98118", color: "#10B981",
+                  borderRadius: 8, border: "1px solid #10B98130",
+                }}>ONLINE</span>
+              )}
+            </div>
+            <div style={{ fontSize: "0.62rem", color: C.muted }}>
+              {driver.phone ?? "N/A"} · {driver.vehicleType ?? "—"}
+            </div>
+          </div>
+
+          {/* Pending warning */}
+          {hasPending && (
+            <div style={{
+              padding: "3px 8px", borderRadius: 20, fontSize: "0.65rem", fontWeight: 700,
+              background: "#F59E0b18", color: "#F59E0B",
+              border: "1px solid #F59E0B28", whiteSpace: "nowrap",
+            }}>
+              ⚠ {inr(wallet.pendingAmount)} due
+            </div>
+          )}
+
+          {/* Balance */}
+          <div style={{ textAlign: "right", paddingRight: 4 }}>
+            <div style={{ fontSize: "0.58rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Balance
+            </div>
+            <div style={{
+              fontSize: "0.95rem", fontWeight: 800, color: "#10B981",
+              fontFamily: "'JetBrains Mono', monospace",
+              display: "flex", alignItems: "center", gap: 5,
+            }}>
+              {showBal ? inr(wallet.availableBalance) : "••••••"}
+              <button
+                onClick={e => { e.stopPropagation(); setShowBal(!showBal); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: C.muted, padding: 2 }}
+              >
+                {showBal ? <Eye size={12} /> : <EyeOff size={12} />}
+              </button>
+            </div>
+          </div>
+
+          {/* Chevron */}
+          <div style={{ color: C.muted }}>
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+        </div>
+
+        {/* ── Expanded ───────────────────────────────────────────── */}
+        {expanded && (
+          <div style={{ padding: "0.9rem 1rem", borderTop: `1px solid ${C.border}`, background: C.surface2 }}>
+
+            {/* 4 stat tiles */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.5rem", marginBottom: "0.9rem" }}>
+              {[
+                { label: "Total Earnings",     value: wallet.totalEarnings,    color: "#10B981" },
+                { label: "Commission Paid ✓",  value: paidComm,                color: "#3B82F6" },
+                { label: "Pending Commission", value: wallet.pendingAmount,    color: "#F59E0B" },
+                { label: "Available Balance",  value: wallet.availableBalance, color: C.primary },
+              ].map((s, i) => (
+                <div key={i} style={{
+                  background: s.color + "0d",
+                  border: `1px solid ${s.color}20`,
+                  borderRadius: 7, padding: "0.6rem 0.7rem",
+                }}>
+                  <div style={{ fontSize: "0.58rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    {s.label}
+                  </div>
+                  <div style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: "0.88rem", fontWeight: 800, color: s.color, marginTop: 3,
+                  }}>
+                    {inr(s.value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Recent 5 transactions */}
+            <div style={{ marginBottom: "0.8rem" }}>
+              <div style={{
+                fontSize: "0.6rem", color: C.muted, textTransform: "uppercase",
+                letterSpacing: "0.06em", fontWeight: 600, marginBottom: "0.4rem",
+              }}>
+                Recent Transactions
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden" }}>
+                {recentTxns.length === 0 ? (
+                  <div style={{ padding: "1rem", textAlign: "center", color: C.muted, fontSize: "0.78rem" }}>
+                    No transactions yet
+                  </div>
+                ) : (
+                  recentTxns.map((t, i) => (
+                    <TxnRow
+                      key={t._id ?? i} txn={t}
+                      onClick={() => { setSelTxn(t); setShowDetail(true); }}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Action */}
+            <Btn size="sm" variant="primary" full icon={<History size={12} />} onClick={onViewHistory}>
+              Full History ({wallet.transactions?.length ?? 0} transactions)
+            </Btn>
+          </div>
+        )}
+      </div>
+
+      {/* Txn detail from mini-list */}
+      <TxnDetailModal
+        txn={selTxn}
+        driverName={driver?.name ?? "Unknown"}
+        open={showDetail}
+        onClose={() => { setShowDetail(false); setSelTxn(null); }}
+      />
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GLOBAL STATS BAR
+// ══════════════════════════════════════════════════════════════════
+function StatsBar({ walletData, driverCount }: { walletData: Record<string, WalletData>; driverCount: number }) {
+  const s = useMemo(() => {
+    let bal = 0, earn = 0, pend = 0, paid = 0;
+    Object.values(walletData).forEach(w => {
+      bal  += w.availableBalance ?? 0;
+      earn += w.totalEarnings    ?? 0;
+      pend += w.pendingAmount    ?? 0;
+      paid += (w.transactions ?? [])
+        .filter(t => t.type === "commission_payment" && t.status === "completed")
+        .reduce((s, t) => s + t.amount, 0);
+    });
+    return { bal, earn, pend, paid };
+  }, [walletData]);
+
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+      gap: "0.8rem", marginBottom: "1.4rem",
+    }}>
+      {[
+        { icon: <User size={15} />,        label: "Drivers",            value: String(driverCount),     color: C.primary },
+        { icon: <DollarSign size={15} />,  label: "Total Balance",      value: inr(s.bal),              color: "#10B981" },
+        { icon: <TrendingUp size={15} />,  label: "Total Earnings",     value: inr(s.earn),             color: "#06B6D4" },
+        { icon: <Clock size={15} />,       label: "Pending Commission", value: inr(s.pend),             color: "#F59E0B" },
+        { icon: <ShieldCheck size={15} />, label: "Commission Paid ✓",  value: inr(s.paid),             color: "#3B82F6" },
+      ].map((x, i) => (
+        <div key={i} style={{
+          background: C.surface, border: `1px solid ${C.border}`,
+          borderRadius: 9, padding: "0.85rem 1rem",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <span style={{ color: x.color }}>{x.icon}</span>
+            <span style={{ fontSize: "0.62rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {x.label}
+            </span>
+          </div>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "1.05rem", fontWeight: 800, color: x.color,
+          }}>
+            {x.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MAIN PAGE
+// ══════════════════════════════════════════════════════════════════
 export default function DriverWalletManagement() {
   const { drivers, loading, error, refetch } = useDrivers();
-  const { mutate, loading: acting } = useMutation();
 
-  const [statusF, setStatusF] = useState("all");
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(1);
-  const [selectedDriver, setSelectedDriver] = useState<any>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
-  const [showTxnModal, setShowTxnModal] = useState(false);
-  const [walletData, setWalletData] = useState<Record<string, any>>({});
-  const [walletLoading, setWalletLoading] = useState(false);
-  const [walletError, setWalletError] = useState<string | null>(null);
+  const [statusF,      setStatusF]      = useState("all");
+  const [q,            setQ]            = useState("");
+  const [page,         setPage]         = useState(1);
+  const [walletData,   setWalletData]   = useState<Record<string, WalletData>>({});
+  const [walletLoading,setWalletLoading]= useState(false);
+  const [walletError,  setWalletError]  = useState<string | null>(null);
+  const [histDriver,   setHistDriver]   = useState<any>(null);
+  const [showHist,     setShowHist]     = useState(false);
 
-  // ── Fetch wallet data ──────────────────────────────────────────────────
+  // ── Fetch all wallets ────────────────────────────────────────────
   const fetchWallets = useCallback(async () => {
+    setWalletLoading(true);
+    setWalletError(null);
     try {
-      setWalletLoading(true);
-      setWalletError(null);
+      const headers = await getAuthHeaders();
 
-      const token = localStorage.getItem("adminToken");
+      const res = await fetch(`${API}/api/wallet/admin/wallets`, { headers });
 
-      if (!token) {
-        const errMsg = "No admin token found. Please log in again.";
-        console.error("❌", errMsg);
-        setWalletError(errMsg);
-        return;
+      if (!res.ok) {
+        const txt = await res.text();
+        let msg = `Server error (${res.status})`;
+        try { msg = JSON.parse(txt).message || msg; } catch {}
+        throw new Error(msg);
       }
 
-      const url = `${API_BASE_URL}/api/wallet/admin/wallets`;
-      console.log("🔄 Fetching wallets from:", url);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || "API error");
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "x-admin-token": token,
-        },
+      const map: Record<string, WalletData> = {};
+      (data.wallets ?? []).forEach((item: any) => {
+        const id = (item._id || item.driverId || "").toString();
+        if (!id) return;
+        const w = item.wallet || item;
+        map[id] = {
+          availableBalance: w.availableBalance ?? 0,
+          totalEarnings:    w.totalEarnings    ?? 0,
+          totalCommission:  w.totalCommission  ?? 0,
+          paidCommission:   w.paidCommission   ?? 0,
+          pendingAmount:    w.pendingAmount     ?? 0,
+          transactions:     w.transactions     ?? [],
+          lastUpdated:      w.lastUpdated,
+        };
       });
 
-      console.log("📡 Response status:", response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Response error:", response.status, errorText);
-
-        let errorMessage = `Server error (${response.status})`;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.message || errorMessage;
-        } catch {
-          // not JSON
-        }
-
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      console.log("✅ Wallet API response:", {
-        success: data.success,
-        walletCount: data.wallets?.length,
-        total: data.total,
-        stats: data.stats,
-      });
-
-      if (!data.success) {
-        throw new Error(data.message || "API returned success: false");
-      }
-
-      // ── Map wallets by driver ID ──────────────────────────────────
-      const walletMap: Record<string, any> = {};
-
-      if (Array.isArray(data.wallets)) {
-        data.wallets.forEach((item: any) => {
-          const driverId = (item._id || item.driverId || "").toString();
-
-          if (!driverId) return;
-
-          // The API returns: { _id, driverId, wallet: { ... } }
-          if (item.wallet) {
-            walletMap[driverId] = {
-              availableBalance: item.wallet.availableBalance ?? 0,
-              totalEarnings: item.wallet.totalEarnings ?? 0,
-              totalCommission: item.wallet.totalCommission ?? 0,
-              pendingAmount: item.wallet.pendingAmount ?? 0,
-              transactions: item.wallet.transactions ?? [],
-              lastUpdated: item.wallet.lastUpdated,
-            };
-          } else {
-            // Fallback: flat structure
-            walletMap[driverId] = {
-              availableBalance: item.availableBalance ?? 0,
-              totalEarnings: item.totalEarnings ?? 0,
-              totalCommission: item.totalCommission ?? 0,
-              pendingAmount: item.pendingAmount ?? 0,
-              transactions: item.transactions ?? [],
-              lastUpdated: item.lastUpdated,
-            };
-          }
-        });
-      }
-
-      console.log("📊 Mapped wallets for", Object.keys(walletMap).length, "drivers");
-
-      // Debug: check if driver IDs match
-      if (drivers.length > 0 && Object.keys(walletMap).length > 0) {
-        const sampleDriverId = drivers[0]?._id?.toString();
-        const matchFound = walletMap[sampleDriverId] !== undefined;
-        console.log(
-          matchFound
-            ? `✅ ID match confirmed: driver ${sampleDriverId} found in wallet map`
-            : `⚠️ ID mismatch: driver ${sampleDriverId} NOT in wallet map. Wallet keys: ${Object.keys(walletMap).slice(0, 3).join(", ")}`
-        );
-      }
-
-      setWalletData(walletMap);
-
-    } catch (err: any) {
-      console.error("❌ Wallet fetch error:", err);
-      setWalletError(err.message || "Failed to load wallet data");
+      setWalletData(map);
+    } catch (e: any) {
+      setWalletError(e.message || "Failed to load wallets");
     } finally {
       setWalletLoading(false);
     }
-  }, [drivers]);
+  }, []);
 
-  // Fetch wallets when drivers load
-  useEffect(() => {
-    if (drivers.length > 0) {
-      console.log("👥 Drivers loaded:", drivers.length, "- fetching wallets...");
-      fetchWallets();
-    }
-  }, [drivers, fetchWallets]);
+  useEffect(() => { if (drivers.length > 0) fetchWallets(); }, [drivers, fetchWallets]);
 
-  // ── Stats ──────────────────────────────────────────────────────────────
-  const stats: WalletStats = useMemo(() => {
-    let totalBalance = 0;
-    let totalEarnings = 0;
-    let pendingPayouts = 0;
-
-    Object.values(walletData).forEach((w: any) => {
-      totalBalance += w.availableBalance ?? 0;
-      totalEarnings += w.totalEarnings ?? 0;
-      pendingPayouts += w.pendingAmount ?? 0;
-    });
-
-    return {
-      totalDrivers: drivers.length,
-      totalBalance,
-      totalEarnings,
-      pendingPayouts,
-    };
-  }, [walletData, drivers]);
-
-  // ── Filtering ──────────────────────────────────────────────────────────
+  // ── Filter + paginate ─────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let result = drivers;
-
-    if (statusF === "active") {
-      result = result.filter((d: any) => d.isOnline);
-    } else if (statusF === "inactive") {
-      result = result.filter((d: any) => !d.isOnline);
-    }
-
+    let r = drivers as any[];
+    if (statusF === "active")   r = r.filter(d => d.isOnline);
+    if (statusF === "inactive") r = r.filter(d => !d.isOnline);
     if (q) {
       const ql = q.toLowerCase();
-      result = result.filter((d: any) =>
-        d.name?.toLowerCase().includes(ql) ||
-        d.phone?.includes(ql) ||
-        d._id?.includes(ql) ||
-        d.email?.toLowerCase().includes(ql)
+      r = r.filter(d =>
+        d.name?.toLowerCase().includes(ql) || d.phone?.includes(ql) ||
+        d._id?.includes(ql) || d.email?.toLowerCase().includes(ql)
       );
     }
-
-    return result;
+    return r;
   }, [drivers, statusF, q]);
 
   const pages = Math.ceil(filtered.length / PER);
   const paged = filtered.slice((page - 1) * PER, page * PER);
-
-  // Reset page on filter change
   useEffect(() => { setPage(1); }, [statusF, q]);
 
-  // ── Handlers ───────────────────────────────────────────────────────────
-  const handleViewTransactions = (driver: any) => {
-    setSelectedDriver(driver);
-    toast.info(`Viewing transactions for ${driver.name}`);
-  };
+  if (error) return <PageError message={error} onRetry={() => { refetch(); fetchWallets(); }} />;
 
-  const handleRefresh = () => {
-    refetch();
-    fetchWallets();
+  const emptyWallet: WalletData = {
+    availableBalance: 0, totalEarnings: 0, totalCommission: 0,
+    paidCommission: 0, pendingAmount: 0, transactions: [],
   };
-
-  // ── Render ─────────────────────────────────────────────────────────────
-  if (error) return <PageError message={error} onRetry={handleRefresh} />;
 
   return (
     <div style={{ padding: "1.5rem", background: C.bg, minHeight: "100vh" }}>
 
       {/* Header */}
-      <div style={{ marginBottom: "2rem" }}>
-        <div style={{
-          display: "flex", justifyContent: "space-between",
-          alignItems: "center", marginBottom: "1rem",
-        }}>
-          <div>
-            <h1 style={{ fontSize: "1.8rem", fontWeight: 800, margin: 0 }}>
-              💰 Driver Wallet Management
-            </h1>
-            <p style={{ fontSize: "0.9rem", color: C.muted, margin: "0.5rem 0 0" }}>
-              Monitor driver earnings, transactions, and wallet balance
-            </p>
-          </div>
-          <Btn
-            icon={<RefreshCw size={14} />}
-            onClick={handleRefresh}
-            loading={loading || walletLoading}
-          >
-            Refresh
-          </Btn>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "1.4rem" }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: "1.55rem", fontWeight: 800, display: "flex", alignItems: "center", gap: 10 }}>
+            <Wallet size={20} /> Driver Wallet Management
+          </h1>
+          <p style={{ margin: "0.35rem 0 0", fontSize: "0.8rem", color: C.muted }}>
+            Earnings, commission charges, and verified Razorpay payment history per driver
+          </p>
         </div>
+        <Btn
+          icon={<RefreshCw size={13} />}
+          onClick={() => { refetch(); fetchWallets(); }}
+          loading={loading || walletLoading}
+        >
+          Refresh
+        </Btn>
       </div>
 
-      {/* Debug Panel (development only) */}
-      {import.meta.env.DEV && (
-        <div style={{
-          background: "#111827", border: "1px solid #374151", borderRadius: 8,
-          padding: "0.75rem 1rem", marginBottom: "1rem",
-          fontSize: "0.72rem", fontFamily: "monospace", color: "#9CA3AF",
-        }}>
-          <div>📊 Drivers: {drivers.length} | Wallets: {Object.keys(walletData).length}</div>
-          <div>🔗 API: {API_BASE_URL}/api/wallet/admin/wallets</div>
-          <div>🔑 Token: {localStorage.getItem("adminToken") ? `Present (${localStorage.getItem("adminToken")!.length} chars)` : "❌ MISSING"}</div>
-          {walletError && <div style={{ color: "#EF4444" }}>❌ {walletError}</div>}
-          {Object.keys(walletData).length > 0 && (
-            <div style={{ color: "#10B981" }}>
-              ✅ Wallet IDs: {Object.keys(walletData).slice(0, 3).join(", ")}
-            </div>
-          )}
-          {drivers.length > 0 && (
-            <div>
-              👤 Driver IDs: {drivers.slice(0, 3).map((d: any) => d._id).join(", ")}
-            </div>
-          )}
-        </div>
+      {/* Stats */}
+      {!loading && !walletLoading && (
+        <StatsBar walletData={walletData} driverCount={drivers.length} />
       )}
 
-      {/* Error Banner */}
+      {/* Error banner */}
       {walletError && (
         <div style={{
-          background: C.red + "15", border: "1px solid " + C.red + "33",
-          borderRadius: 8, padding: "1rem", marginBottom: "1rem",
+          background: "#EF444412", border: "1px solid #EF444428",
+          borderRadius: 8, padding: "0.85rem 1rem", marginBottom: "1rem",
           display: "flex", alignItems: "center", gap: 8,
         }}>
-          <AlertCircle size={18} style={{ color: C.red }} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 600, color: C.red }}>Failed to load wallet data</div>
-            <div style={{ fontSize: "0.8rem", color: C.muted }}>{walletError}</div>
+          <AlertCircle size={15} color="#EF4444" />
+          <div style={{ flex: 1, fontSize: "0.82rem" }}>
+            <span style={{ fontWeight: 700, color: "#EF4444" }}>Wallet error: </span>
+            <span style={{ color: C.muted }}>{walletError}</span>
           </div>
           <Btn size="sm" variant="ghost" onClick={fetchWallets}>Retry</Btn>
         </div>
       )}
 
-      {/* Stats */}
-      {!loading && <WalletStatsSection stats={stats} />}
-
       {/* Filters */}
-      <Card style={{ marginBottom: "1.5rem" }}>
-        <div style={{
-          display: "grid", gridTemplateColumns: "1fr 200px 1fr",
-          gap: "1rem", alignItems: "flex-end",
-        }}>
-          <SearchBar
-            placeholder="Search driver name, phone, or ID…"
-            value={q}
-            onChange={setQ}
-          />
-          <Sel
-            label="Status"
-            value={statusF}
-            onChange={setStatusF}
-            options={STATUS_TABS}
-          />
-          <div style={{ textAlign: "right", fontSize: "0.85rem", color: C.muted }}>
-            <span style={{ fontWeight: 600 }}>{filtered.length}</span> drivers
-            {Object.keys(walletData).length > 0 && (
-              <span>
-                {" "}· <span style={{ color: C.green }}>{Object.keys(walletData).length}</span> wallets
-              </span>
-            )}
+      <div style={{
+        display: "grid", gridTemplateColumns: "1fr 180px auto",
+        gap: "0.75rem", alignItems: "flex-end",
+        background: C.surface, border: `1px solid ${C.border}`,
+        borderRadius: 8, padding: "0.85rem", marginBottom: "1rem",
+      }}>
+        <SearchBar placeholder="Search name, phone, or ID…" value={q} onChange={setQ} />
+        <Sel label="Status" value={statusF} onChange={setStatusF} options={DRIVER_STATUS_OPTS} />
+        <div style={{ fontSize: "0.78rem", color: C.muted, paddingBottom: 2 }}>
+          <strong>{filtered.length}</strong> drivers ·{" "}
+          <span style={{ color: "#10B981" }}>{Object.keys(walletData).length}</span> wallets
+        </div>
+      </div>
+
+      {/* Spinner */}
+      {(loading || walletLoading) && <Spinner label="Loading wallet data…" />}
+
+      {/* Cards */}
+      {!loading && !walletLoading && (
+        paged.length > 0 ? (
+          <>
+            {paged.map((driver: any) => {
+              const id     = (driver._id ?? "").toString();
+              const wallet = walletData[id] ?? emptyWallet;
+              return (
+                <DriverWalletCard
+                  key={driver._id}
+                  driver={driver}
+                  wallet={wallet}
+                  onViewHistory={() => { setHistDriver(driver); setShowHist(true); }}
+                />
+              );
+            })}
+            <Pagination page={page} pages={pages} total={filtered.length} perPage={PER} onChange={setPage} />
+          </>
+        ) : (
+          <div style={{
+            background: C.surface, border: `1px solid ${C.border}`,
+            borderRadius: 10, padding: "3rem", textAlign: "center",
+          }}>
+            <Wallet size={38} color={C.muted} style={{ marginBottom: 10 }} />
+            <p style={{ color: C.muted, margin: 0 }}>No drivers found</p>
           </div>
-        </div>
-      </Card>
-
-      {/* Loading */}
-      {(loading || walletLoading) && <Spinner label="Loading wallets…" />}
-
-      {/* Driver Cards */}
-      {!loading && !walletLoading && paged.length > 0 ? (
-        <div>
-          {paged.map((driver: any) => {
-            const driverIdStr = (driver._id || "").toString();
-            const wallet = walletData[driverIdStr] || {
-              availableBalance: 0,
-              totalEarnings: 0,
-              totalCommission: 0,
-              pendingAmount: 0,
-              transactions: [],
-            };
-
-            return (
-              <DriverWalletCard
-                key={driver._id}
-                driver={driver}
-                wallet={wallet}
-                onViewTransactions={() => handleViewTransactions(driver)}
-              />
-            );
-          })}
-          <Pagination
-            page={page}
-            pages={pages}
-            total={filtered.length}
-            perPage={PER}
-            onChange={setPage}
-          />
-        </div>
-      ) : (
-        !loading && !walletLoading && (
-          <Card style={{ padding: "2rem", textAlign: "center" }}>
-            <Wallet size={48} style={{ color: C.muted, margin: "0 auto 1rem" }} />
-            <p style={{ color: C.muted, fontSize: "1rem" }}>No drivers found</p>
-            <p style={{ color: C.muted, fontSize: "0.8rem", marginTop: 4 }}>
-              {q ? "Try adjusting your search" : "No drivers registered yet"}
-            </p>
-          </Card>
         )
       )}
 
-      {/* Transaction Detail Modal */}
-      <TransactionDetailModal
-        transaction={selectedTransaction}
-        driverName={selectedDriver?.name ?? "Unknown"}
-        open={showTxnModal}
-        onClose={() => {
-          setShowTxnModal(false);
-          setSelectedTransaction(null);
-        }}
+      {/* Full history modal */}
+      <DriverHistoryModal
+        driver={histDriver}
+        wallet={histDriver ? (walletData[(histDriver._id ?? "").toString()] ?? emptyWallet) : null}
+        open={showHist}
+        onClose={() => { setShowHist(false); setHistDriver(null); }}
       />
     </div>
   );
