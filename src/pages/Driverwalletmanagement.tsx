@@ -277,7 +277,7 @@ function DriverWalletCard({
                       fontWeight: 700, color: TXN_COLORS[txn.type] || C.muted,
                       fontFamily: "'JetBrains Mono', monospace",
                     }}>
-                      {txn.type === "debit" ? "-" : "+"} ₹{(txn.amount || 0).toFixed(2)}
+                      {txn.type === "credit" ? "+" : "-"} ₹{(txn.amount || 0).toFixed(2)}
                     </div>
                   </div>
                 ))}
@@ -311,6 +311,212 @@ function DriverWalletCard({
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
+
+// ── AllTransactionsModal ─────────────────────────────────────────────────────
+function AllTransactionsModal({
+  driver, wallet, open, onClose,
+}: {
+  driver: any; wallet: any; open: boolean; onClose: () => void;
+}) {
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [selectedTxn, setSelectedTxn] = useState<any>(null);
+
+  const transactions: any[] = wallet?.transactions ?? [];
+
+  const filtered = transactions
+    .filter((t) => filter === "all" || t.type === filter)
+    .filter((t) => {
+      if (!search) return true;
+      const s = search.toLowerCase();
+      return (
+        t.description?.toLowerCase().includes(s) ||
+        t.razorpayPaymentId?.toLowerCase().includes(s) ||
+        t.razorpayOrderId?.toLowerCase().includes(s) ||
+        t.paymentMethod?.toLowerCase().includes(s)
+      );
+    });
+
+  const amountColor = (type: string) =>
+    type === "credit" ? C.green : type === "commission" ? C.amber : C.red;
+
+  const amountPrefix = (type: string) =>
+    type === "credit" ? "+" : "-";
+
+  return (
+    <>
+      <Modal open={open} onClose={onClose} title={`All Transactions — ${driver?.name ?? ""}`} width={760}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+
+          {/* Driver summary strip */}
+          <div style={{
+            background: C.surface2, border: "1px solid " + C.border,
+            borderRadius: 8, padding: "0.9rem 1.2rem",
+            display: "flex", gap: "2rem", flexWrap: "wrap", alignItems: "flex-start",
+          }}>
+            {[
+              { label: "Driver", value: driver?.name ?? "—" },
+              { label: "Phone", value: driver?.phone ?? "—" },
+              { label: "Vehicle", value: driver?.vehicleType ?? "—" },
+            ].map((item) => (
+              <div key={item.label}>
+                <div style={{ fontSize: "0.62rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{item.label}</div>
+                <div style={{ fontWeight: 700, fontSize: "0.9rem" }}>{item.value}</div>
+              </div>
+            ))}
+            {[
+              { label: "Available Balance", value: `₹${(wallet?.availableBalance ?? 0).toFixed(2)}`, color: C.green },
+              { label: "Pending Commission", value: `₹${(wallet?.pendingAmount ?? 0).toFixed(2)}`, color: C.amber },
+              { label: "Total Earnings", value: `₹${(wallet?.totalEarnings ?? 0).toFixed(2)}`, color: C.cyan },
+              { label: "Total Commission", value: `₹${(wallet?.totalCommission ?? 0).toFixed(2)}`, color: C.red },
+            ].map((item) => (
+              <div key={item.label}>
+                <div style={{ fontSize: "0.62rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{item.label}</div>
+                <div style={{ fontWeight: 800, fontSize: "1rem", color: item.color, fontFamily: "monospace" }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Filters */}
+          <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+            {["all", "credit", "debit", "commission"].map((f) => (
+              <button key={f} onClick={() => setFilter(f)} style={{
+                padding: "4px 14px", borderRadius: 20, border: "1px solid",
+                cursor: "pointer", fontSize: "0.78rem", fontWeight: 600,
+                borderColor: filter === f ? C.primary : C.border,
+                background: filter === f ? C.primary + "20" : "transparent",
+                color: filter === f ? C.primary : C.muted,
+              }}>
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+                {f === "commission" && (
+                  <span style={{ marginLeft: 5, fontSize: "0.7rem", opacity: 0.7 }}>
+                    (paid)
+                  </span>
+                )}
+              </button>
+            ))}
+            <input
+              placeholder="Search payment ID, method, description…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                flex: 1, minWidth: 200, padding: "5px 10px",
+                borderRadius: 6, border: "1px solid " + C.border,
+                background: C.surface2, color: "inherit", fontSize: "0.82rem", outline: "none",
+              }}
+            />
+            <span style={{ fontSize: "0.78rem", color: C.muted, whiteSpace: "nowrap" }}>
+              {filtered.length} of {transactions.length} transactions
+            </span>
+          </div>
+
+          {/* Table */}
+          <div style={{ maxHeight: 440, overflowY: "auto" }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: "2rem", textAlign: "center", color: C.muted, fontSize: "0.85rem" }}>
+                No transactions found
+              </div>
+            ) : (
+              <Table headers={["Type", "Description", "Amount", "Method", "Payment ID / UPI Ref", "Order ID", "Status", "Date"]}>
+                {filtered.map((txn: any, idx: number) => (
+                  <TR key={txn._id || idx} onClick={() => setSelectedTxn(txn)}>
+                    <TD>
+                      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        {TXN_ICONS[txn.type] || <AlertCircle size={13} style={{ color: C.muted }} />}
+                        <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", color: amountColor(txn.type) }}>
+                          {txn.type}
+                        </span>
+                      </div>
+                    </TD>
+                    <TD>
+                      <span style={{ fontSize: "0.8rem" }}>
+                        {txn.description || "—"}
+                      </span>
+                    </TD>
+                    <TD>
+                      <span style={{ fontWeight: 800, fontFamily: "monospace", color: amountColor(txn.type) }}>
+                        {amountPrefix(txn.type)}₹{(txn.amount ?? 0).toFixed(2)}
+                      </span>
+                    </TD>
+                    <TD>
+                      <span style={{
+                        fontSize: "0.72rem", fontWeight: 600, textTransform: "uppercase",
+                        padding: "2px 8px", borderRadius: 4,
+                        background: C.primary + "18", color: C.primary,
+                      }}>
+                        {txn.paymentMethod || "—"}
+                      </span>
+                    </TD>
+                    <TD>
+                      {txn.razorpayPaymentId ? (
+                        <div>
+                          <div style={{ fontSize: "0.72rem", fontFamily: "monospace", color: C.cyan }}>{txn.razorpayPaymentId}</div>
+                          <div style={{ fontSize: "0.6rem", color: C.muted }}>UPI Ref</div>
+                        </div>
+                      ) : <span style={{ color: C.muted, fontSize: "0.75rem" }}>—</span>}
+                    </TD>
+                    <TD>
+                      {txn.razorpayOrderId
+                        ? <span style={{ fontSize: "0.7rem", fontFamily: "monospace", color: C.muted }}>{txn.razorpayOrderId}</span>
+                        : <span style={{ color: C.muted, fontSize: "0.75rem" }}>—</span>}
+                    </TD>
+                    <TD><Badge status={txn.status ?? "completed"} /></TD>
+                    <TD>
+                      <span style={{ fontSize: "0.72rem", color: C.muted, whiteSpace: "nowrap" }}>
+                        {txn.createdAt ? new Date(txn.createdAt).toLocaleString("en-IN") : "—"}
+                      </span>
+                    </TD>
+                  </TR>
+                ))}
+              </Table>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Transaction detail sub-modal */}
+      {selectedTxn && (
+        <Modal open={!!selectedTxn} onClose={() => setSelectedTxn(null)} title="Transaction Details" width={480}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+            <div style={{
+              background: amountColor(selectedTxn.type) + "12",
+              border: "1px solid " + amountColor(selectedTxn.type) + "22",
+              borderRadius: 8, padding: "1rem",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {TXN_ICONS[selectedTxn.type]}
+                <div>
+                  <div style={{ fontSize: "0.62rem", color: C.muted, textTransform: "uppercase" }}>{selectedTxn.type}</div>
+                  <div style={{ fontSize: "0.88rem", color: amountColor(selectedTxn.type), fontWeight: 700 }}>{selectedTxn.description}</div>
+                </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: "1.4rem", fontWeight: 800, color: amountColor(selectedTxn.type), fontFamily: "monospace" }}>
+                  {amountPrefix(selectedTxn.type)}₹{(selectedTxn.amount ?? 0).toFixed(2)}
+                </div>
+                <div style={{ marginTop: 4 }}><Badge status={selectedTxn.status} /></div>
+              </div>
+            </div>
+            <div style={{ background: C.surface2, borderRadius: 8, overflow: "hidden", border: "1px solid " + C.border }}>
+              <InfoRow label="Driver Name" value={driver?.name ?? "—"} />
+              <InfoRow label="Phone" value={driver?.phone ?? "—"} />
+              <InfoRow label="Transaction Type" value={selectedTxn.type?.toUpperCase()} />
+              <InfoRow label="Amount" value={`${amountPrefix(selectedTxn.type)}₹${(selectedTxn.amount ?? 0).toFixed(2)}`} />
+              <InfoRow label="Status" value={selectedTxn.status ?? "—"} />
+              <InfoRow label="Payment Method" value={selectedTxn.paymentMethod?.toUpperCase() ?? "—"} />
+              {selectedTxn.razorpayPaymentId && <InfoRow label="Payment ID (UPI Ref)" value={selectedTxn.razorpayPaymentId} />}
+              {selectedTxn.razorpayOrderId && <InfoRow label="Razorpay Order ID" value={selectedTxn.razorpayOrderId} />}
+              {selectedTxn.tripId && <InfoRow label="Trip ID" value={selectedTxn.tripId?.toString()} />}
+              <InfoRow label="Date & Time" value={selectedTxn.createdAt ? new Date(selectedTxn.createdAt).toLocaleString("en-IN") : "—"} />
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
 export default function DriverWalletManagement() {
   const { drivers, loading, error, refetch } = useDrivers();
   const { mutate, loading: acting } = useMutation();
@@ -324,6 +530,9 @@ export default function DriverWalletManagement() {
   const [walletData, setWalletData] = useState<Record<string, any>>({});
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [showAllTxnModal, setShowAllTxnModal] = useState(false);
+  const [allTxnDriver, setAllTxnDriver] = useState<any>(null);
+  const [allTxnWallet, setAllTxnWallet] = useState<any>(null);
 
   // ── Fetch wallet data ──────────────────────────────────────────────────
   const fetchWallets = useCallback(async () => {
@@ -382,19 +591,15 @@ export default function DriverWalletManagement() {
       }
 
       // ── Map wallets by driver ID ──────────────────────────────────
-      // After .populate('driverId'), the API returns:
-      // { _id: walletId, driverId: { _id: driverObjectId, name, phone, vehicleType }, ... }
-      // So we must key by item.driverId._id (not item._id which is the wallet's own _id)
+      // After .populate('driverId'), driverId is an object {_id, name, phone}
+      // We must key by driverId._id — NOT item._id (which is the wallet's own _id)
       const walletMap: Record<string, any> = {};
 
       if (Array.isArray(data.wallets)) {
         data.wallets.forEach((item: any) => {
-          // driverId is a populated object after populate() — extract its _id
-          const populatedDriver = item.driverId;
+          const pop = item.driverId;
           const driverIdStr = (
-            typeof populatedDriver === "object" && populatedDriver !== null
-              ? populatedDriver._id          // populated object
-              : populatedDriver              // plain string/ObjectId (fallback)
+            typeof pop === "object" && pop !== null ? pop._id : pop
           )?.toString();
 
           if (!driverIdStr) return;
@@ -404,10 +609,13 @@ export default function DriverWalletManagement() {
             totalEarnings:    item.totalEarnings    ?? 0,
             totalCommission:  item.totalCommission  ?? 0,
             pendingAmount:    item.pendingAmount     ?? 0,
-            transactions:     item.transactions     ?? [],
+            transactions:     (item.transactions    ?? [])
+                                .slice()
+                                .sort((a: any, b: any) =>
+                                  new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+                                ),
             lastUpdated:      item.lastUpdated,
-            // Keep populated driver info for display use
-            driverInfo: typeof populatedDriver === "object" ? populatedDriver : null,
+            driverInfo:       typeof pop === "object" ? pop : null,
           };
         });
       }
@@ -494,8 +702,11 @@ export default function DriverWalletManagement() {
 
   // ── Handlers ───────────────────────────────────────────────────────────
   const handleViewTransactions = (driver: any) => {
-    setSelectedDriver(driver);
-    toast.info(`Viewing transactions for ${driver.name}`);
+    const driverIdStr = (driver._id || "").toString();
+    const wallet = walletData[driverIdStr] || { transactions: [] };
+    setAllTxnDriver(driver);
+    setAllTxnWallet(wallet);
+    setShowAllTxnModal(true);
   };
 
   const handleRefresh = () => {
@@ -647,6 +858,16 @@ export default function DriverWalletManagement() {
             </p>
           </Card>
         )
+      )}
+
+      {/* All Transactions Modal */}
+      {allTxnDriver && (
+        <AllTransactionsModal
+          driver={allTxnDriver}
+          wallet={allTxnWallet}
+          open={showAllTxnModal}
+          onClose={() => { setShowAllTxnModal(false); setAllTxnDriver(null); setAllTxnWallet(null); }}
+        />
       )}
 
       {/* Transaction Detail Modal */}
