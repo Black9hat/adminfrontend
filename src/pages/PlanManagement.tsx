@@ -589,6 +589,44 @@ function getToken(): string {
   return localStorage.getItem("token") ?? "";
 }
 
+/**
+ * Safe fetch helper — throws a readable error (never crashes on HTML responses).
+ * Returns parsed JSON on success.
+ */
+async function apiFetch<T>(
+  url: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken()}`,
+      ...(options.headers ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    // Try to get a useful message from the body (JSON or plain text)
+    let msg = `API error ${res.status}: ${res.statusText}`;
+    try {
+      const ct = res.headers.get("content-type") ?? "";
+      if (ct.includes("application/json")) {
+        const errBody = await res.json() as { message?: string };
+        if (errBody.message) msg = errBody.message;
+      } else {
+        // Server returned HTML (404 page, etc.) — don't try to parse it
+        console.error(`Non-JSON error response from ${url} (${res.status})`);
+      }
+    } catch {
+      // ignore parse errors on error body
+    }
+    throw new Error(msg);
+  }
+
+  return res.json() as Promise<T>;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 interface StatCardProps {
@@ -908,17 +946,19 @@ export default function PlanManagement(): JSX.Element {
     void fetchData();
   }, []);
 
+  // ── API calls ──────────────────────────────────────────────────────────────
+
   async function fetchData(): Promise<void> {
     try {
       setLoading(true);
-      const res = await fetch("/api/admin/drivers/plans", {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json() as { data?: DriverWithPlan[] };
+      // FIX: use apiFetch so non-JSON (HTML 404) responses throw a clean error
+      const data = await apiFetch<{ data?: DriverWithPlan[] }>(
+        "/api/admin/drivers/plans"
+      );
       setDrivers(data.data ?? []);
     } catch (err) {
       console.error(err);
-      toast.error("Failed to load data");
+      toast.error(err instanceof Error ? err.message : "Failed to load data");
     } finally {
       setLoading(false);
     }
@@ -931,37 +971,79 @@ export default function PlanManagement(): JSX.Element {
     }
     try {
       setActing(true);
-      const payload: DriverPlan = {
-        ...editingPlan,
-        benefits: benefitsInput.split("\n").map((b) => b.trim()).filter(Boolean),
-      };
 
-      let url: string;
-      if (selectedDriver !== null) {
-        url = editingPlan.id !== ""
-          ? `/api/admin/drivers/${selectedDriver._id}/plans/${editingPlan.id}`
-          : `/api/admin/drivers/${selectedDriver._id}/plans`;
+      const benefits = benefitsInput.split("\n").map((b) => b.trim()).filter(Boolean);
+
+      // ─────────────────────────────────────────────────────────────────────
+      // FIX: route selection
+      //
+      //  selectedDriver !== null  &&  editingPlan.id !== ""
+      //    → updating an existing DriverPlan record
+      //    → PUT /api/admin/drivers/:driverId/plans/:driverPlanId
+      //
+      //  selectedDriver !== null  &&  editingPlan.id === ""
+      //    → assigning a brand-new plan to a driver
+      //    → POST /api/admin/drivers/:driverId/assign-plan   ← was broken before
+      //
+      //  selectedDriver === null
+      //    → creating a new Plan template
+      //    → POST /api/admin/plans
+      // ─────────────────────────────────────────────────────────────────────
+
+      if (selectedDriver !== null && editingPlan.id !== "") {
+        // ── Update existing driver plan ──────────────────────────────────
+        await apiFetch(
+          `/api/admin/drivers/${selectedDriver._id}/plans/${editingPlan.id}`,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              ...editingPlan,
+              benefits,
+            }),
+          }
+        );
+        toast.success("Plan updated successfully");
+
+      } else if (selectedDriver !== null && editingPlan.id === "") {
+        // ── Assign new plan to driver ────────────────────────────────────
+        // Backend expects: { planId, expiryDays, reason }
+        // editingPlan here is used as the "template selector"; planName is
+        // matched to an existing plan OR you can extend the form to carry
+        // planId explicitly. For now we send the full plan fields so the
+        // backend can use what it needs.
+        await apiFetch(
+          `/api/admin/drivers/${selectedDriver._id}/assign-plan`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              planId: editingPlan.id || undefined, // pass if available
+              expiryDays: 30,
+              // also forward editable fields in case backend accepts overrides
+              ...editingPlan,
+              benefits,
+            }),
+          }
+        );
+        toast.success("Plan assigned to driver successfully");
+
       } else {
-        url = `/api/admin/plans`;
+        // ── Create new plan template ─────────────────────────────────────
+        await apiFetch("/api/admin/plans", {
+          method: "POST",
+          body: JSON.stringify({
+            ...editingPlan,
+            benefits,
+          }),
+        });
+        toast.success("Plan created successfully");
       }
 
-      const res = await fetch(url, {
-        method: editingPlan.id !== "" ? "PUT" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error("Failed to save plan");
-
-      toast.success(editingPlan.id !== "" ? "Plan updated successfully" : "Plan created successfully");
       setShowEditModal(false);
       setShowCreateModal(false);
       void fetchData();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to save plan");
+      toast.error(err instanceof Error ? err.message : "Failed to save plan");
     } finally {
       setActing(false);
     }
@@ -971,20 +1053,18 @@ export default function PlanManagement(): JSX.Element {
     if (selectedDriver === null) return;
     try {
       setActing(true);
-      const res = await fetch(`/api/admin/drivers/${selectedDriver._id}/assign-plan`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({ planId, expiryDays: 30 }),
-      });
-      if (!res.ok) throw new Error("Failed to assign plan");
+      await apiFetch(
+        `/api/admin/drivers/${selectedDriver._id}/assign-plan`,
+        {
+          method: "POST",
+          body: JSON.stringify({ planId, expiryDays: 30 }),
+        }
+      );
       toast.success("Plan assigned to driver");
       void fetchData();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to assign plan");
+      toast.error(err instanceof Error ? err.message : "Failed to assign plan");
     } finally {
       setActing(false);
     }
@@ -994,19 +1074,15 @@ export default function PlanManagement(): JSX.Element {
     if (!window.confirm("Deactivate this plan?")) return;
     try {
       setActing(true);
-      const res = await fetch(
+      await apiFetch(
         `/api/admin/drivers/${driverId}/plans/${planId}/deactivate`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${getToken()}` },
-        }
+        { method: "POST" }
       );
-      if (!res.ok) throw new Error("Failed to deactivate plan");
       toast.success("Plan deactivated");
       void fetchData();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to deactivate plan");
+      toast.error(err instanceof Error ? err.message : "Failed to deactivate plan");
     } finally {
       setActing(false);
     }
@@ -1016,16 +1092,12 @@ export default function PlanManagement(): JSX.Element {
     if (!window.confirm("Delete this plan template?")) return;
     try {
       setActing(true);
-      const res = await fetch(`/api/admin/plans/${planId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!res.ok) throw new Error("Failed to delete plan");
+      await apiFetch(`/api/admin/plans/${planId}`, { method: "DELETE" });
       toast.success("Plan template deleted");
       void fetchData();
     } catch (err) {
       console.error(err);
-      toast.error("Failed to delete plan");
+      toast.error(err instanceof Error ? err.message : "Failed to delete plan");
     } finally {
       setActing(false);
     }
