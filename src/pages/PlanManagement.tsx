@@ -11,23 +11,14 @@
 //   6. Assign plans to drivers
 // ════════════════════════════════════════════════════════════════════════════════
 
-import React, { useState, useEffect, type ReactNode } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  Plus,
-  Edit,
-  Trash2,
-  Save,
-  X,
-  TrendingUp,
-  DollarSign,
-  Users,
-  BarChart3,
-  Clock,
-  Zap,
-  Eye,
-  EyeOff,
+  Plus, Edit, Trash2,
+  TrendingUp, DollarSign, Users,
+  Eye, EyeOff,
 } from "lucide-react";
 import { toast } from "react-toastify";
+import { useMutation } from "../hooks/index";
 
 // ════════════════════════════════════════════════════════════════════════════════
 // TYPES
@@ -411,86 +402,9 @@ const STYLES = `
 `;
 
 // ════════════════════════════════════════════════════════════════════════════════
-// API SERVICE
+// API — uses the same useMutation hook as RideManagement (axiosInstance)
 // ════════════════════════════════════════════════════════════════════════════════
-
-const PlanAPI = {
-  baseUrl: `${process.env.REACT_APP_API_URL}/api`,
-
-  async getPlans(active?: boolean) {
-    const url = new URL(`${this.baseUrl}/admin/plans`);
-    if (active !== undefined) url.searchParams.append("active", String(active));
-
-    const response = await fetch(url, {
-      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
-    });
-    if (!response.ok) throw new Error("Failed to fetch plans");
-    const data = await response.json();
-    return data.data;
-  },
-
-  async createPlan(plan: Partial<Plan>) {
-    const response = await fetch(`${this.baseUrl}/admin/plans`, {
-      method: "POST",
-      headers: {
-        "x-admin-token": localStorage.getItem("admin_token") || "",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(plan),
-    });
-    if (!response.ok) throw new Error("Failed to create plan");
-    const data = await response.json();
-    return data.data;
-  },
-
-  async updatePlan(planId: string, updates: Partial<Plan>) {
-    const response = await fetch(`${this.baseUrl}/admin/plans/${planId}`, {
-      method: "PUT",
-      headers: {
-        "x-admin-token": localStorage.getItem("admin_token") || "",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(updates),
-    });
-    if (!response.ok) throw new Error("Failed to update plan");
-    const data = await response.json();
-    return data.data;
-  },
-
-  async deletePlan(planId: string) {
-    const response = await fetch(`${this.baseUrl}/admin/plans/${planId}`, {
-      method: "DELETE",
-      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
-    });
-    if (!response.ok) throw new Error("Failed to delete plan");
-  },
-
-  async getAnalytics(from?: string, to?: string) {
-    const url = new URL(`${this.baseUrl}/admin/plans/analytics`);
-    if (from) url.searchParams.append("from", from);
-    if (to) url.searchParams.append("to", to);
-
-    const response = await fetch(url, {
-      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
-    });
-    if (!response.ok) throw new Error("Failed to fetch analytics");
-    const data = await response.json();
-    return data.data;
-  },
-
-  async getRevenueStats(from?: string, to?: string) {
-    const url = new URL(`${this.baseUrl}/admin/plans/stats/revenue`);
-    if (from) url.searchParams.append("from", from);
-    if (to) url.searchParams.append("to", to);
-
-    const response = await fetch(url, {
-      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
-    });
-    if (!response.ok) throw new Error("Failed to fetch revenue stats");
-    const data = await response.json();
-    return data.data;
-  },
-};
+// (PlanAPI removed — replaced by useMutation calls inline in the component)
 
 // ════════════════════════════════════════════════════════════════════════════════
 // COMPONENT
@@ -499,6 +413,8 @@ const PlanAPI = {
 interface Props {}
 
 export const PlanManagement: React.FC<Props> = () => {
+  const { mutate, loading: acting } = useMutation();
+
   const [activeTab, setActiveTab] = useState<"manage" | "analytics">("manage");
   const [plans, setPlans] = useState<Plan[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
@@ -506,7 +422,7 @@ export const PlanManagement: React.FC<Props> = () => {
   const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
   const [showForm, setShowForm] = useState(false);
 
-  const [formData, setFormData] = useState<Partial<Plan>>({
+  const emptyForm: Partial<Plan> = {
     planName: "",
     planType: "basic",
     commissionRate: 20,
@@ -518,7 +434,9 @@ export const PlanManagement: React.FC<Props> = () => {
     description: "",
     benefits: [],
     isActive: true,
-  });
+  };
+
+  const [formData, setFormData] = useState<Partial<Plan>>(emptyForm);
 
   useEffect(() => {
     if (activeTab === "manage") {
@@ -529,26 +447,22 @@ export const PlanManagement: React.FC<Props> = () => {
   }, [activeTab]);
 
   const loadPlans = async () => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      const data = await PlanAPI.getPlans();
-      setPlans(data);
-    } catch (error) {
-      toast.error("Failed to load plans");
-      console.error(error);
+      const { ok, data } = await mutate("get", "/admin/plans", undefined);
+      if (ok) setPlans(data?.data ?? []);
+      else toast.error("Failed to load plans");
     } finally {
       setIsLoading(false);
     }
   };
 
   const loadAnalytics = async () => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      const data = await PlanAPI.getRevenueStats();
-      setAnalytics(data);
-    } catch (error) {
-      toast.error("Failed to load analytics");
-      console.error(error);
+      const { ok, data } = await mutate("get", "/admin/plans/stats/revenue", undefined);
+      if (ok) setAnalytics(data?.data ?? null);
+      else toast.error("Failed to load analytics");
     } finally {
       setIsLoading(false);
     }
@@ -556,19 +470,7 @@ export const PlanManagement: React.FC<Props> = () => {
 
   const handleCreateNew = () => {
     setEditingPlan(null);
-    setFormData({
-      planName: "",
-      planType: "basic",
-      commissionRate: 20,
-      bonusMultiplier: 1.0,
-      noCommission: false,
-      monthlyFee: 0,
-      planPrice: 299,
-      durationDays: 30,
-      description: "",
-      benefits: [],
-      isActive: true,
-    });
+    setFormData(emptyForm);
     setShowForm(true);
   };
 
@@ -580,42 +482,27 @@ export const PlanManagement: React.FC<Props> = () => {
 
   const handleDelete = async (planId: string) => {
     if (!window.confirm("Are you sure you want to delete this plan?")) return;
-
-    try {
-      await PlanAPI.deletePlan(planId);
-      toast.success("Plan deleted");
-      loadPlans();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete plan");
-    }
+    const { ok } = await mutate("delete", `/admin/plans/${planId}`, undefined);
+    if (ok) { toast.success("Plan deleted"); loadPlans(); }
+    else toast.error("Failed to delete plan");
   };
 
   const handleSave = async () => {
-    try {
-      if (editingPlan) {
-        await PlanAPI.updatePlan(editingPlan._id, formData);
-        toast.success("Plan updated");
-      } else {
-        await PlanAPI.createPlan(formData);
-        toast.success("Plan created");
-      }
-      setShowForm(false);
-      loadPlans();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save plan");
+    if (editingPlan) {
+      const { ok } = await mutate("put", `/admin/plans/${editingPlan._id}`, formData);
+      if (ok) { toast.success("Plan updated"); setShowForm(false); loadPlans(); }
+      else toast.error("Failed to update plan");
+    } else {
+      const { ok } = await mutate("post", "/admin/plans", formData);
+      if (ok) { toast.success("Plan created"); setShowForm(false); loadPlans(); }
+      else toast.error("Failed to create plan");
     }
   };
 
   const handleToggleActive = async (plan: Plan) => {
-    try {
-      await PlanAPI.updatePlan(plan._id, { isActive: !plan.isActive });
-      toast.success(
-        plan.isActive ? "Plan deactivated" : "Plan activated"
-      );
-      loadPlans();
-    } catch (error) {
-      toast.error("Failed to toggle plan status");
-    }
+    const { ok } = await mutate("put", `/admin/plans/${plan._id}`, { isActive: !plan.isActive });
+    if (ok) { toast.success(plan.isActive ? "Plan deactivated" : "Plan activated"); loadPlans(); }
+    else toast.error("Failed to toggle plan status");
   };
 
   return (
@@ -810,8 +697,10 @@ export const PlanManagement: React.FC<Props> = () => {
             <button
               className="pm-btn-save"
               onClick={handleSave}
+              disabled={acting}
+              style={{ opacity: acting ? 0.6 : 1 }}
             >
-              Save Plan
+              {acting ? "Saving…" : "Save Plan"}
             </button>
             <button
               className="pm-btn-cancel"
