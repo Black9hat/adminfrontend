@@ -17,7 +17,7 @@ import {
   Sparkles,
   ArrowUpRight,
 } from "lucide-react";
-import type { Driver } from "../types/index";
+import { useDriversWithPlans, usePlanTemplates } from "../hooks/index";
 import { toast } from "react-toastify";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -52,12 +52,20 @@ interface DriverPlan {
   createdBy?: string;
 }
 
-interface DriverWithPlan extends Driver {
+interface DriverWithPlan {
   _id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  isDriver?: boolean;
+  isOnline?: boolean;
+  isBlocked?: boolean;
+  vehicleType?: string;
   currentPlan?: DriverPlan;
   planHistory?: DriverPlan[];
   totalEarnings?: number;
   planEarnings?: number;
+  [key: string]: unknown;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -597,48 +605,15 @@ function daysUntil(dateStr: string): number {
   return Math.floor((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
 }
 
-function getToken(): string {
-return localStorage.getItem("adminToken") ?? "";
-}
+import axiosInstance from "../api/axiosInstance";
 
-/**
- * Safe fetch helper — throws a readable error (never crashes on HTML responses).
- * Returns parsed JSON on success.
- */
-const API_BASE = "https://ghumobackend.onrender.com";
-
-async function apiFetch<T>(
-  url: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const res = await fetch(`${API_BASE}${url}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-      ...(options.headers ?? {}),
-    },
-  });
-
-  if (!res.ok) {
-    // Try to get a useful message from the body (JSON or plain text)
-    let msg = `API error ${res.status}: ${res.statusText}`;
-    try {
-      const ct = res.headers.get("content-type") ?? "";
-      if (ct.includes("application/json")) {
-        const errBody = await res.json() as { message?: string };
-        if (errBody.message) msg = errBody.message;
-      } else {
-        // Server returned HTML (404 page, etc.) — don't try to parse it
-        console.error(`Non-JSON error response from ${url} (${res.status})`);
-      }
-    } catch {
-      // ignore parse errors on error body
-    }
-    throw new Error(msg);
-  }
-
-  return res.json() as Promise<T>;
+async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method ?? "GET").toLowerCase() as "get"|"post"|"put"|"delete";
+  const body = options.body ? JSON.parse(options.body as string) : undefined;
+  const r = method === "get"
+    ? await axiosInstance.get(url)
+    : await (axiosInstance as any)[method](url, body);
+  return r.data as T;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -944,8 +919,6 @@ function PaginationBar({ page, total, onChange }: PaginationProps): JSX.Element 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function PlanManagement(): JSX.Element {
-  const [drivers, setDrivers]                 = useState<DriverWithPlan[]>([]);
-  const [loading, setLoading]                 = useState<boolean>(true);
   const [statusF, setStatusF]                 = useState<string>("all");
   const [q, setQ]                             = useState<string>("");
   const [page, setPage]                       = useState<number>(1);
@@ -955,51 +928,14 @@ export default function PlanManagement(): JSX.Element {
   const [editingPlan, setEditingPlan]         = useState<DriverPlan>(EMPTY_PLAN);
   const [benefitsInput, setBenefitsInput]     = useState<string>("");
   const [acting, setActing]                   = useState<boolean>(false);
-  const [planTemplates, setPlanTemplates]       = useState<PlanTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
-  useEffect(() => {
-    void fetchData();
-    void fetchPlanTemplates();
-  }, []);
+  const { drivers, loading, refetch: fetchData } = useDriversWithPlans(statusF, page);
+  const { planTemplates, refetch: fetchPlanTemplates } = usePlanTemplates();
 
-  // ── API calls ──────────────────────────────────────────────────────────────
+  useEffect(() => { void fetchPlanTemplates(); }, []);
 
-  async function fetchData(): Promise<void> {
-    try {
-      setLoading(true);
-      const data = await apiFetch<{ data?: DriverWithPlan[] }>(
-        "/api/admin/drivers/plans"
-      );
-      // Normalize MongoDB _id → id throughout so currentPlan.id works correctly
-      const normalized = (data.data ?? []).map((d) => ({
-        ...d,
-        currentPlan: d.currentPlan
-          ? {
-              ...d.currentPlan,
-              id: (d.currentPlan as any)._id ?? d.currentPlan.id ?? "",
-            }
-          : undefined,
-      }));
-      setDrivers(normalized);
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Failed to load data");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function fetchPlanTemplates(): Promise<void> {
-    try {
-      const data = await apiFetch<{ data?: PlanTemplate[] }>(
-        "/api/admin/plans?active=true"
-      );
-      setPlanTemplates(data.data ?? []);
-    } catch (err) {
-      console.error("Failed to load plan templates:", err);
-    }
-  }
+  // ── API mutation calls ────────────────────────────────────────────────────
 
   async function handleSavePlan(): Promise<void> {
     if (editingPlan.planName.trim() === "") {
@@ -1153,7 +1089,7 @@ export default function PlanManagement(): JSX.Element {
     drivers.length > 0
       ? (
           drivers.reduce(
-            (sum, d) => sum + (d.currentPlan?.commissionRate ?? 20),
+            (sum: number, d: DriverWithPlan) => sum + (d.currentPlan?.commissionRate ?? 20),
             0
           ) / drivers.length
         ).toFixed(1)

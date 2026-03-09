@@ -126,5 +126,30 @@ export function usePayments() {
   return { payments, loading, error, refetch };
 }
 
+// ─── Drivers with Plans ───────────────────────────────────────────────────────
+export function useDriversWithPlans(status = "all", page = 1) {
+  const url = `/admin/drivers/plans?status=${status}&page=${page}&_=${Date.now()}`;
+  const { data, loading, error, refetch } =
+    useApi<{ data: any[]; pagination: any }>(url, [status, page]);
+
+  // Normalize MongoDB _id → id on currentPlan
+  const drivers = (data?.data ?? []).map((d: any) => ({
+    ...d,
+    currentPlan: d.currentPlan
+      ? { ...d.currentPlan, id: d.currentPlan._id ?? d.currentPlan.id ?? "" }
+      : undefined,
+  }));
+
+  return { drivers, pagination: data?.pagination ?? null, loading, error, refetch };
+}
+
+// ─── Plan Templates ───────────────────────────────────────────────────────────
+export function usePlanTemplates() {
+  const { data, loading, error, refetch } =
+    useApi<{ data: any[] }>("/admin/plans?active=true");
+
+  return { planTemplates: data?.data ?? [], loading, error, refetch };
+}
+
 // ─── Re-export types for convenience ───────────────────────────────────────────
 export type { Trip, Driver, Customer, FareRate, Payment, Complaint, Review, PromoCode, DashboardStats };
