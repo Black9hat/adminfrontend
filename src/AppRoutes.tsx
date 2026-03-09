@@ -33,11 +33,12 @@ const FraudDetection   = lazy(() => import("./pages/FareFraud").then(m => ({ def
 // ── New pages ─────────────────────────────────────────────────────────────────
 const FareManagement         = lazy(() => import("./pages/FareManagement"));
 const DriverEarnings         = lazy(() => import("./pages/Driverearningsmanagement"));
-const DriverWalletManagement = lazy(() => import("./pages/Driverwalletmanagement")); // ✅ NEW
+const DriverWalletManagement = lazy(() => import("./pages/Driverwalletmanagement"));
 const ServiceAreas           = lazy(() => import("./pages/Serviceareamanagement"));
 const CustomersPage          = lazy(() => import("./pages/Customer"));
 const AdminPromotions        = lazy(() => import("./pages/AdminPromotions"));
 const IncentivesManagement   = lazy(() => import("./pages/IncentivesManagement"));
+const PlanManagement         = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
 const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage       = lazy(() => import("./pages/Notifications"));
 const HelpManagement         = lazy(() => import("./pages/Helpmanagement"));
@@ -89,6 +90,7 @@ export default function AppRoutes() {
           <Route path="/fare-pricing"       element={<FarePricing />} />
           <Route path="/promotions"         element={<AdminPromotions />} />
           <Route path="/incentives"         element={<IncentivesManagement />} />
+          <Route path="/plans"              element={<PlanManagement />} />
           <Route path="/coupons"            element={<CouponsManagement />} />
 
           {/* Safety & Trust */}

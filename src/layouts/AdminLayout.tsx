@@ -5,7 +5,7 @@ import {
   Star, Monitor, UserCog, Zap, Search, Scale,
   DollarSign, ChevronDown, ChevronRight, LogOut, Menu,
   Bell, MapPin, HelpCircle, Gift, TrendingUp, Percent, Receipt,
-  FileText, Ticket, Activity, Wallet,
+  FileText, Ticket, Activity, Wallet, Gem,
 } from "lucide-react";
 import { C } from "../components/ui";
 
@@ -37,7 +37,7 @@ const GROUPS: NavGroup[] = [
       { path: "/rides",         label: "Ride Management",   icon: <Car size={14} />        },
       { path: "/drivers",       label: "Driver Management", icon: <UserCog size={14} />    },
       { path: "/earnings",      label: "Driver Earnings",   icon: <TrendingUp size={14} /> },
-      { path: "/wallets",       label: "Driver Wallets",    icon: <Wallet size={14} />     }, // ✅ NEW
+      { path: "/wallets",       label: "Driver Wallets",    icon: <Wallet size={14} />     },
       { path: "/documents",     label: "Documents",         icon: <FileText size={14} />   },
       { path: "/parcels",       label: "Parcel Delivery",   icon: <Package size={14} />    },
       { path: "/gps",           label: "GPS Monitoring",    icon: <Map size={14} />        },
@@ -61,6 +61,7 @@ const GROUPS: NavGroup[] = [
       { path: "/fare-pricing",    label: "Fare Rates",         icon: <Zap size={14} />        },
       { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={14} />    },
       { path: "/incentives",      label: "Incentives",         icon: <Gift size={14} />       },
+      { path: "/plans",           label: "Driver Plans",       icon: <Gem size={14} />        }, // ✅ NEW
       { path: "/coupons",         label: "Coupons",            icon: <Ticket size={14} />     },
     ],
   },
