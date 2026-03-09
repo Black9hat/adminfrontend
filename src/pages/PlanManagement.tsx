@@ -586,7 +586,7 @@ function daysUntil(dateStr: string): number {
 }
 
 function getToken(): string {
-  return localStorage.getItem("token") ?? "";
+return localStorage.getItem("adminToken") ?? "";
 }
 
 /**
