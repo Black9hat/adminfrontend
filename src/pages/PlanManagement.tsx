@@ -964,7 +964,7 @@ export default function PlanManagement(): JSX.Element {
       if (selectedDriver !== null && editingPlan.id !== "") {
         // ── Update existing driver plan ──────────────────────────────────
         await apiFetch(
-          `/api/admin/drivers/${selectedDriver._id}/plans/${editingPlan.id}`,
+          `/admin/drivers/${selectedDriver._id}/plans/${editingPlan.id}`,
           {
             method: "PUT",
             body: JSON.stringify({
@@ -983,7 +983,7 @@ export default function PlanManagement(): JSX.Element {
           return;
         }
         await apiFetch(
-          `/api/admin/drivers/${selectedDriver._id}/assign-plan`,
+          `/admin/drivers/${selectedDriver._id}/assign-plan`,
           {
             method: "POST",
             body: JSON.stringify({
@@ -996,7 +996,7 @@ export default function PlanManagement(): JSX.Element {
 
       } else {
         // ── Create new plan template ─────────────────────────────────────
-        await apiFetch("/api/admin/plans", {
+        await apiFetch("/admin/plans", {
           method: "POST",
           body: JSON.stringify({
             ...editingPlan,
@@ -1022,7 +1022,7 @@ export default function PlanManagement(): JSX.Element {
     try {
       setActing(true);
       await apiFetch(
-        `/api/admin/drivers/${selectedDriver._id}/assign-plan`,
+        `/admin/drivers/${selectedDriver._id}/assign-plan`,
         {
           method: "POST",
           body: JSON.stringify({ planId, expiryDays: 30 }),
@@ -1043,7 +1043,7 @@ export default function PlanManagement(): JSX.Element {
     try {
       setActing(true);
       await apiFetch(
-        `/api/admin/drivers/${driverId}/plans/${planId}/deactivate`,
+        `/admin/drivers/${driverId}/plans/${planId}/deactivate`,
         { method: "POST" }
       );
       toast.success("Plan deactivated");
@@ -1060,7 +1060,7 @@ export default function PlanManagement(): JSX.Element {
     if (!window.confirm("Delete this plan template?")) return;
     try {
       setActing(true);
-      await apiFetch(`/api/admin/plans/${planId}`, { method: "DELETE" });
+      await apiFetch(`/admin/plans/${planId}`, { method: "DELETE" });
       toast.success("Plan template deleted");
       void fetchData();
     } catch (err) {
