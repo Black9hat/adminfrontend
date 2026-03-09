@@ -82,24 +82,26 @@ export function useDashboardStats() {
 
   return { stats: data?.stats ?? null, loading, error, refetch };
 }
+
 // ─── Mutation helper ──────────────────────────────────────────────────────────
 export function useMutation() {
   const [loading, setLoad] = useState(false);
   const [error, setError]  = useState("");
 
   const mutate = useCallback(async (
-    method: "get"|"post"|"put"|"patch"|"delete",
+    method: "get" | "post" | "put" | "patch" | "delete",
     url: string,
     body?: unknown
-  ): Promise<{ data: any; ok: boolean }> => {
+  // ✅ FIX: now returns `message` so callers can show the real server error
+  ): Promise<{ data: any; ok: boolean; message: string }> => {
     setLoad(true); setError("");
     try {
       const r = await (axiosInstance as any)[method](url, body, { headers: hdrs() });
-      return { data: r.data, ok: true };
+      return { data: r.data, ok: true, message: "" };
     } catch (e: any) {
       const msg = e.response?.data?.message ?? "Action failed";
       setError(msg);
-      return { data: null, ok: false };
+      return { data: null, ok: false, message: msg };
     } finally { setLoad(false); }
   }, []);
 
