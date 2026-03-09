@@ -24,6 +24,18 @@ import { toast } from "react-toastify";
 
 type PlanType = "basic" | "standard" | "premium";
 
+interface PlanTemplate {
+  _id: string;
+  planName: string;
+  planType: PlanType;
+  commissionRate: number;
+  bonusMultiplier: number;
+  noCommission: boolean;
+  monthlyFee: number;
+  description: string;
+  benefits: string[];
+}
+
 interface DriverPlan {
   id: string;
   planName: string;
@@ -943,9 +955,12 @@ export default function PlanManagement(): JSX.Element {
   const [editingPlan, setEditingPlan]         = useState<DriverPlan>(EMPTY_PLAN);
   const [benefitsInput, setBenefitsInput]     = useState<string>("");
   const [acting, setActing]                   = useState<boolean>(false);
+  const [planTemplates, setPlanTemplates]       = useState<PlanTemplate[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   useEffect(() => {
     void fetchData();
+    void fetchPlanTemplates();
   }, []);
 
   // ── API calls ──────────────────────────────────────────────────────────────
@@ -953,16 +968,36 @@ export default function PlanManagement(): JSX.Element {
   async function fetchData(): Promise<void> {
     try {
       setLoading(true);
-      // FIX: use apiFetch so non-JSON (HTML 404) responses throw a clean error
       const data = await apiFetch<{ data?: DriverWithPlan[] }>(
         "/api/admin/drivers/plans"
       );
-      setDrivers(data.data ?? []);
+      // Normalize MongoDB _id → id throughout so currentPlan.id works correctly
+      const normalized = (data.data ?? []).map((d) => ({
+        ...d,
+        currentPlan: d.currentPlan
+          ? {
+              ...d.currentPlan,
+              id: (d.currentPlan as any)._id ?? d.currentPlan.id ?? "",
+            }
+          : undefined,
+      }));
+      setDrivers(normalized);
     } catch (err) {
       console.error(err);
       toast.error(err instanceof Error ? err.message : "Failed to load data");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchPlanTemplates(): Promise<void> {
+    try {
+      const data = await apiFetch<{ data?: PlanTemplate[] }>(
+        "/api/admin/plans?active=true"
+      );
+      setPlanTemplates(data.data ?? []);
+    } catch (err) {
+      console.error("Failed to load plan templates:", err);
     }
   }
 
@@ -1007,22 +1042,19 @@ export default function PlanManagement(): JSX.Element {
         toast.success("Plan updated successfully");
 
       } else if (selectedDriver !== null && editingPlan.id === "") {
-        // ── Assign new plan to driver ────────────────────────────────────
-        // Backend expects: { planId, expiryDays, reason }
-        // editingPlan here is used as the "template selector"; planName is
-        // matched to an existing plan OR you can extend the form to carry
-        // planId explicitly. For now we send the full plan fields so the
-        // backend can use what it needs.
+        // ── Assign plan template to driver ───────────────────────────────────
+        if (!selectedTemplateId) {
+          toast.error("Please select a plan template to assign");
+          setActing(false);
+          return;
+        }
         await apiFetch(
           `/api/admin/drivers/${selectedDriver._id}/assign-plan`,
           {
             method: "POST",
             body: JSON.stringify({
-              planId: editingPlan.id || undefined, // pass if available
+              planId: selectedTemplateId,
               expiryDays: 30,
-              // also forward editable fields in case backend accepts overrides
-              ...editingPlan,
-              benefits,
             }),
           }
         );
@@ -1348,6 +1380,7 @@ export default function PlanManagement(): JSX.Element {
                               setBenefitsInput(
                                 (driver.currentPlan?.benefits ?? []).join("\n")
                               );
+                              setSelectedTemplateId("");
                               setShowEditModal(true);
                             }}
                           >
@@ -1429,6 +1462,25 @@ export default function PlanManagement(): JSX.Element {
                   )}
                 </div>
               </>
+            )}
+
+            {/* Template selector — shown only when driver has NO plan yet */}
+            {selectedDriver.currentPlan === undefined && (
+              <div className="pm-field" style={{ marginBottom: "1rem" }}>
+                <label className="pm-label">Assign Plan Template</label>
+                <select
+                  className="pm-field-select"
+                  value={selectedTemplateId}
+                  onChange={(e) => setSelectedTemplateId(e.target.value)}
+                >
+                  <option value="">— Select a plan —</option>
+                  {planTemplates.map((t) => (
+                    <option key={t._id} value={t._id}>
+                      {t.planName} ({t.planType}) — {t.noCommission ? "0%" : `${t.commissionRate}%`} commission
+                    </option>
+                  ))}
+                </select>
+              </div>
             )}
 
             <p className="pm-section-lbl">Modify Plan</p>
