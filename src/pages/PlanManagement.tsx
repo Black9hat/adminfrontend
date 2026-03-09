@@ -1,104 +1,87 @@
-import React, { useState, useMemo, useEffect, type MouseEvent } from "react";
-import type { ReactNode, JSX } from "react";
+// admin/PlanManagement_ENHANCED.tsx
+// ════════════════════════════════════════════════════════════════════════════════
+// ADMIN PLAN MANAGEMENT - Create, Edit, and Manage Driver Plans
+// ════════════════════════════════════════════════════════════════════════════════
+// Features:
+//   1. Create and edit plan templates
+//   2. Set commission rates and bonuses
+//   3. Define plan pricing and duration
+//   4. Enable/disable plans
+//   5. View purchase history and analytics
+//   6. Assign plans to drivers
+// ════════════════════════════════════════════════════════════════════════════════
+
+import React, { useState, useEffect, type ReactNode } from "react";
 import {
-  RefreshCw,
   Plus,
   Edit,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
+  Trash2,
+  Save,
+  X,
   TrendingUp,
   DollarSign,
   Users,
-  Crown,
-  Shield,
-  Star,
-  X,
-  Sparkles,
-  ArrowUpRight,
+  BarChart3,
+  Clock,
+  Zap,
+  Eye,
+  EyeOff,
 } from "lucide-react";
-import { useDriversWithPlans, usePlanTemplates } from "../hooks/index";
 import { toast } from "react-toastify";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// TYPES
+// ════════════════════════════════════════════════════════════════════════════════
 
-type PlanType = "basic" | "standard" | "premium";
-
-interface PlanTemplate {
+interface Plan {
   _id: string;
   planName: string;
-  planType: PlanType;
+  planType: "basic" | "standard" | "premium";
   commissionRate: number;
   bonusMultiplier: number;
   noCommission: boolean;
   monthlyFee: number;
-  description: string;
-  benefits: string[];
-}
-
-interface DriverPlan {
-  id: string;
-  planName: string;
-  planType: PlanType;
-  commissionRate: number;
-  bonusMultiplier: number;
-  noCommission: boolean;
-  monthlyFee: number;
+  planPrice: number;
+  durationDays: number;
+  isTimeBasedPlan: boolean;
+  planStartTime?: string;
+  planEndTime?: string;
   description: string;
   benefits: string[];
   isActive: boolean;
-  activatedDate?: string;
-  expiryDate?: string;
-  createdBy?: string;
+  totalPurchases?: number;
+  totalRevenueGenerated?: number;
+  lastPurchaseDate?: string;
+  createdAt?: string;
 }
 
-interface DriverWithPlan {
-  _id: string;
-  name?: string;
-  phone?: string;
-  email?: string;
-  isDriver?: boolean;
-  isOnline?: boolean;
-  isBlocked?: boolean;
-  vehicleType?: string;
-  currentPlan?: DriverPlan;
-  planHistory?: DriverPlan[];
-  totalEarnings?: number;
-  planEarnings?: number;
-  [key: string]: unknown;
+interface PlanStats {
+  totalRevenue: number;
+  totalPurchases: number;
+  avgOrderValue: number;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+interface RevenueData {
+  date: string;
+  revenue: number;
+  purchases: number;
+}
 
-const PER = 15;
+interface AnalyticsData {
+  totalStats: PlanStats;
+  revenueByPlan: Array<{
+    planName: string;
+    revenue: number;
+    purchases: number;
+    percentage: string;
+  }>;
+  failedPayments: number;
+  dailyRevenue: RevenueData[];
+}
 
-const PLAN_TYPES: Array<{ value: PlanType; label: string; icon: ReactNode }> = [
-  { value: "basic",    label: "Basic",    icon: <Shield size={11} /> },
-  { value: "standard", label: "Standard", icon: <Star   size={11} /> },
-  { value: "premium",  label: "Premium",  icon: <Crown  size={11} /> },
-];
-
-const STATUS_FILTERS: Array<{ value: string; label: string }> = [
-  { value: "all",      label: "All Plans"  },
-  { value: "active",   label: "Active"     },
-  { value: "inactive", label: "Inactive"   },
-  { value: "expired",  label: "Expired"    },
-];
-
-const EMPTY_PLAN: DriverPlan = {
-  id: "",
-  planName: "",
-  planType: "basic",
-  commissionRate: 20,
-  bonusMultiplier: 1.0,
-  noCommission: false,
-  monthlyFee: 0,
-  description: "",
-  benefits: [],
-  isActive: false,
-};
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// STYLES
+// ════════════════════════════════════════════════════════════════════════════════
 
 const STYLES = `
   @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
@@ -117,6 +100,7 @@ const STYLES = `
     justify-content: space-between;
     margin-bottom: 44px;
   }
+
   .pm-title {
     font-family: 'Syne', sans-serif;
     font-size: 2rem;
@@ -128,6 +112,7 @@ const STYLES = `
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
   .pm-sub {
     margin: 0;
     color: #5c5a72;
@@ -148,1306 +133,911 @@ const STYLES = `
     font-family: 'DM Sans', sans-serif;
     font-size: 0.875rem;
     font-weight: 500;
-    box-shadow: 0 0 0 1px rgba(167,139,250,.25), 0 8px 20px rgba(109,40,217,.4);
-    transition: transform .18s, box-shadow .18s;
-  }
-  .pm-btn-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0 0 1px rgba(167,139,250,.4), 0 12px 28px rgba(109,40,217,.5);
+    transition: all 0.3s;
   }
 
-  .pm-stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 14px;
-    margin-bottom: 32px;
-  }
-  .pm-stat {
-    position: relative;
-    overflow: hidden;
-    border-radius: 14px;
-    background: #100f1a;
-    border: 1px solid #1c1c2e;
-    padding: 20px 22px;
-    transition: border-color .2s, transform .2s;
-  }
-  .pm-stat:hover {
-    border-color: #2a2a40;
+  .pm-btn-primary:hover {
     transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(99, 102, 241, 0.3);
   }
-  .pm-stat-glow {
-    position: absolute;
-    top: -16px;
-    right: -16px;
-    width: 72px;
-    height: 72px;
-    border-radius: 50%;
-    filter: blur(28px);
-    opacity: .3;
-    pointer-events: none;
+
+  .pm-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    margin-bottom: 44px;
   }
-  .pm-stat-ico {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
+
+  .pm-card {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2d2d44;
+    border-radius: 16px;
+    padding: 24px;
+    transition: all 0.3s;
+  }
+
+  .pm-card:hover {
+    border-color: #a78bfa;
+    box-shadow: 0 12px 24px rgba(167, 139, 250, 0.1);
+  }
+
+  .pm-card-stat {
     display: flex;
-    align-items: center;
-    justify-content: center;
+    justify-content: space-between;
+    align-items: flex-start;
     margin-bottom: 12px;
   }
-  .pm-stat-val {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.7rem;
-    font-weight: 700;
-    margin: 0 0 3px;
-    color: #ede9ff;
-  }
-  .pm-stat-lbl {
-    font-size: 0.72rem;
+
+  .pm-card-label {
     color: #5c5a72;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    font-size: 0.875rem;
+    font-weight: 500;
   }
 
-  .pm-filters {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-    align-items: center;
+  .pm-card-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.75rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #fff, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
   }
-  .pm-search-wrap {
-    position: relative;
-    flex: 1;
-    min-width: 210px;
-  }
-  .pm-search-ico {
-    position: absolute;
-    left: 13px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #38364e;
-    pointer-events: none;
-    display: flex;
-  }
-  .pm-search {
-    width: 100%;
-    padding: 10px 14px 10px 40px;
-    box-sizing: border-box;
-    background: #100f1a;
-    border: 1px solid #1c1c2e;
-    border-radius: 10px;
-    color: #e4e2f0;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    outline: none;
-    transition: border-color .18s;
-  }
-  .pm-search::placeholder { color: #38364e; }
-  .pm-search:focus { border-color: #6d28d9; }
-  .pm-select {
-    padding: 10px 14px;
-    background: #100f1a;
-    border: 1px solid #1c1c2e;
-    border-radius: 10px;
-    color: #e4e2f0;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    outline: none;
-    cursor: pointer;
-    min-width: 140px;
-    transition: border-color .18s;
-  }
-  .pm-select:focus { border-color: #6d28d9; }
-  .pm-btn-sec {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 14px;
-    background: #100f1a;
-    border: 1px solid #1c1c2e;
-    border-radius: 10px;
-    color: #8b88a8;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    cursor: pointer;
-    transition: border-color .18s, color .18s;
-  }
-  .pm-btn-sec:hover { border-color: #6d28d9; color: #c4b5fd; }
 
-  .pm-table-card {
-    background: #100f1a;
-    border: 1px solid #1c1c2e;
-    border-radius: 18px;
+  .pm-list {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2d2d44;
+    border-radius: 16px;
     overflow: hidden;
   }
-  .pm-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-  .pm-table thead th {
-    padding: 13px 18px;
-    text-align: left;
-    font-size: 0.7rem;
-    font-weight: 600;
-    letter-spacing: 0.07em;
-    text-transform: uppercase;
-    color: #413e58;
-    border-bottom: 1px solid #181826;
-    font-family: 'DM Sans', sans-serif;
-  }
-  .pm-table tbody tr {
-    border-bottom: 1px solid #131321;
-    transition: background .12s;
-  }
-  .pm-table tbody tr:last-child { border-bottom: none; }
-  .pm-table tbody tr:hover { background: #12111e; }
-  .pm-table td {
-    padding: 15px 18px;
-    vertical-align: middle;
+
+  .pm-list-item {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 0.5fr;
+    gap: 16px;
+    padding: 16px 24px;
+    border-bottom: 1px solid #2d2d44;
+    align-items: center;
   }
 
-  .pm-driver-name { font-weight: 500; font-size: 0.875rem; color: #e4e2f0; margin-bottom: 2px; }
-  .pm-driver-phone { font-size: 0.775rem; color: #413e58; }
-  .pm-comm-val { font-weight: 600; font-size: 0.9rem; color: #ede9ff; }
-  .pm-muted { color: #2a2840; font-size: 0.85rem; }
-  .pm-no-plan { color: #2a2840; font-size: 0.83rem; font-style: italic; }
-  .pm-exp-date  { font-size: 0.8rem; color: #5c5a72; }
-  .pm-exp-warn  { font-size: 0.8rem; color: #f59e0b; }
-  .pm-exp-crit  { font-size: 0.8rem; color: #ef4444; }
+  .pm-list-item:last-child {
+    border-bottom: none;
+  }
+
+  .pm-list-header {
+    background: rgba(99, 102, 241, 0.05);
+    padding: 12px 24px;
+    border-bottom: 1px solid #2d2d44;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 0.5fr;
+    gap: 16px;
+    font-weight: 600;
+    color: #a78bfa;
+    font-size: 0.875rem;
+  }
+
+  .pm-plan-name {
+    font-weight: 600;
+    color: #fff;
+  }
 
   .pm-badge {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 3px 9px;
-    border-radius: 20px;
-    font-size: 0.73rem;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    font-family: 'DM Sans', sans-serif;
-    white-space: nowrap;
-  }
-  .pm-badge-premium  { background: rgba(167,139,250,.1);  color: #c4b5fd; border: 1px solid rgba(167,139,250,.2); }
-  .pm-badge-standard { background: rgba(251,191,36,.08);  color: #fbbf24; border: 1px solid rgba(251,191,36,.18); }
-  .pm-badge-basic    { background: rgba(100,116,139,.1);  color: #94a3b8; border: 1px solid rgba(100,116,139,.2); }
-  .pm-badge-active   { background: rgba(52,211,153,.08);  color: #34d399; border: 1px solid rgba(52,211,153,.18); }
-  .pm-badge-inactive { background: rgba(75,75,100,.1);    color: #5c5a72; border: 1px solid rgba(75,75,100,.2);   }
-  .pm-badge-bonus    { background: rgba(16,185,129,.08);  color: #10b981; border: 1px solid rgba(16,185,129,.18); }
-  .pm-badge-nocomm   { background: rgba(52,211,153,.08);  color: #34d399; border: 1px solid rgba(52,211,153,.18); }
-
-  .pm-actions { display: flex; gap: 5px; }
-  .pm-action-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid #1c1c2e;
-    background: transparent;
-    color: #5c5a72;
-    transition: all .15s;
-  }
-  .pm-action-btn:hover { background: #1a1928; border-color: #6d28d9; color: #c4b5fd; }
-  .pm-action-btn-danger:hover { background: rgba(239,68,68,.07); border-color: rgba(239,68,68,.3); color: #f87171; }
-
-  .pm-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    margin-top: 26px;
-  }
-  .pm-page-btn {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    cursor: pointer;
-    border: 1px solid #1c1c2e;
-    background: transparent;
-    color: #5c5a72;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all .14s;
-  }
-  .pm-page-btn:hover:not(:disabled) { border-color: #6d28d9; color: #c4b5fd; }
-  .pm-page-btn.active { background: #6d28d9; border-color: #6d28d9; color: #fff; }
-  .pm-page-btn:disabled { opacity: .3; cursor: not-allowed; }
-  .pm-page-dots { color: #38364e; font-size: 0.8rem; padding: 0 2px; }
-
-  .pm-loading { display: flex; align-items: center; justify-content: center; min-height: 360px; }
-  .pm-spinner {
-    width: 34px;
-    height: 34px;
-    border-radius: 50%;
-    border: 2px solid #1c1c2e;
-    border-top-color: #6d28d9;
-    animation: pm-spin .65s linear infinite;
-  }
-  @keyframes pm-spin { to { transform: rotate(360deg); } }
-
-  .pm-empty { text-align: center; padding: 56px 24px; color: #38364e; }
-  .pm-empty-emoji { font-size: 2.2rem; opacity: .35; margin-bottom: 10px; }
-  .pm-empty-txt   { font-size: 0.875rem; }
-
-  .pm-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(0,0,0,.72);
-    backdrop-filter: blur(7px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    animation: pm-fadeIn .15s ease;
-  }
-  @keyframes pm-fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-  .pm-modal {
-    background: #0d0c18;
-    border: 1px solid #1c1c2e;
-    border-radius: 18px;
-    width: 100%;
-    max-width: 510px;
-    max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 28px 56px rgba(0,0,0,.75), 0 0 0 1px rgba(109,40,217,.1);
-    animation: pm-slideUp .18s ease;
-    scrollbar-width: thin;
-    scrollbar-color: #1c1c2e transparent;
-  }
-  @keyframes pm-slideUp {
-    from { transform: translateY(10px); opacity: 0; }
-    to   { transform: translateY(0);    opacity: 1; }
-  }
-
-  .pm-modal-hdr {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    padding: 26px 26px 18px;
-    border-bottom: 1px solid #181826;
-    position: sticky;
-    top: 0;
-    background: #0d0c18;
-    z-index: 1;
-  }
-  .pm-modal-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: #ede9ff;
-    margin: 0 0 3px;
-    letter-spacing: -0.02em;
-  }
-  .pm-modal-sub { font-size: 0.8rem; color: #413e58; margin: 0; }
-  .pm-close-btn {
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
-    cursor: pointer;
-    border: 1px solid #1c1c2e;
-    background: transparent;
-    color: #413e58;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: all .14s;
-  }
-  .pm-close-btn:hover { background: #181826; color: #e4e2f0; }
-
-  .pm-modal-body { padding: 22px 26px 26px; }
-
-  .pm-info-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    background: #090913;
-    border: 1px solid #171726;
-    border-radius: 11px;
-    padding: 14px;
-    margin-bottom: 22px;
-  }
-  .pm-info-lbl {
-    font-size: 0.68rem;
-    color: #413e58;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 2px;
-  }
-  .pm-info-val { font-size: 0.875rem; color: #c4b5fd; font-weight: 500; }
-
-  .pm-section-lbl {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0 0 14px;
-    font-size: 0.68rem;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 0.75rem;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #38364e;
   }
-  .pm-section-lbl::after { content: ''; flex: 1; height: 1px; background: #181826; }
 
-  .pm-field { margin-bottom: 13px; }
-  .pm-label { display: block; margin-bottom: 5px; font-size: 0.78rem; font-weight: 500; color: #6e6b88; }
-  .pm-input,
-  .pm-textarea,
-  .pm-field-select {
+  .pm-badge-active {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+  }
+
+  .pm-badge-inactive {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+  }
+
+  .pm-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .pm-action-btn {
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    color: #a78bfa;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+  }
+
+  .pm-action-btn:hover {
+    color: #fff;
+    background: rgba(167, 139, 250, 0.1);
+    border-radius: 6px;
+  }
+
+  .pm-form {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2d2d44;
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+
+  .pm-form-group {
+    margin-bottom: 20px;
+  }
+
+  .pm-form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #e4e2f0;
+    font-weight: 500;
+    font-size: 0.875rem;
+  }
+
+  .pm-form-group input,
+  .pm-form-group select,
+  .pm-form-group textarea {
     width: 100%;
-    padding: 10px 13px;
-    box-sizing: border-box;
-    background: #090913;
-    border: 1px solid #181826;
-    border-radius: 9px;
+    padding: 10px 12px;
+    border: 1px solid #2d2d44;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
     color: #e4e2f0;
     font-family: 'DM Sans', sans-serif;
     font-size: 0.875rem;
+    transition: all 0.3s;
+  }
+
+  .pm-form-group input:focus,
+  .pm-form-group select:focus,
+  .pm-form-group textarea:focus {
     outline: none;
-    transition: border-color .18s, box-shadow .18s;
+    border-color: #a78bfa;
+    background: rgba(167, 139, 250, 0.05);
   }
-  .pm-input:focus,
-  .pm-textarea:focus,
-  .pm-field-select:focus {
-    border-color: #6d28d9;
-    box-shadow: 0 0 0 3px rgba(109,40,217,.1);
-  }
-  .pm-input::placeholder,
-  .pm-textarea::placeholder { color: #2a2840; }
-  .pm-textarea { resize: vertical; min-height: 86px; line-height: 1.55; }
-  .pm-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-  .pm-checkbox-row {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 10px 13px;
-    background: #090913;
-    border: 1px solid #181826;
-    border-radius: 9px;
-    cursor: pointer;
-    transition: border-color .18s;
-    margin-bottom: 13px;
-    user-select: none;
+  .pm-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
   }
-  .pm-checkbox-row:hover { border-color: #6d28d9; }
-  .pm-checkbox-row input[type="checkbox"] {
-    accent-color: #6d28d9;
-    width: 14px;
-    height: 14px;
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .pm-checkbox-row span { font-size: 0.875rem; color: #9490b0; }
 
-  .pm-modal-footer {
+  .pm-form-actions {
     display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 22px;
-    padding-top: 18px;
-    border-top: 1px solid #131321;
+    gap: 12px;
+    margin-top: 24px;
   }
-  .pm-btn-cancel {
-    padding: 9px 18px;
-    background: transparent;
-    border: 1px solid #1c1c2e;
-    border-radius: 9px;
-    color: #5c5a72;
-    cursor: pointer;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    transition: all .14s;
-  }
-  .pm-btn-cancel:hover { border-color: #2a2840; color: #9490b0; }
+
   .pm-btn-save {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 9px 22px;
+    flex: 1;
+    padding: 12px 24px;
     background: linear-gradient(135deg, #6d28d9, #9333ea);
-    border: none;
-    border-radius: 9px;
     color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
     cursor: pointer;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 0.875rem;
-    font-weight: 500;
-    box-shadow: 0 4px 14px rgba(109,40,217,.35);
-    transition: transform .15s, box-shadow .15s;
+    transition: all 0.3s;
   }
-  .pm-btn-save:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(109,40,217,.45);
+
+  .pm-btn-save:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(99, 102, 241, 0.3);
   }
-  .pm-btn-save:disabled { opacity: .45; cursor: not-allowed; transform: none; }
-  .pm-btn-spinner {
-    width: 13px;
-    height: 13px;
-    border-radius: 50%;
-    border: 2px solid rgba(255,255,255,.3);
-    border-top-color: #fff;
-    animation: pm-spin .65s linear infinite;
+
+  .pm-btn-cancel {
+    flex: 1;
+    padding: 12px 24px;
+    background: transparent;
+    color: #a78bfa;
+    border: 1px solid #2d2d44;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .pm-btn-cancel:hover {
+    border-color: #a78bfa;
+    background: rgba(167, 139, 250, 0.05);
+  }
+
+  .pm-tabs {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid #2d2d44;
+  }
+
+  .pm-tab {
+    padding: 12px 0;
+    background: transparent;
+    border: none;
+    color: #5c5a72;
+    font-weight: 600;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.3s;
+  }
+
+  .pm-tab.active {
+    color: #a78bfa;
+  }
+
+  .pm-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(135deg, #6d28d9, #9333ea);
+  }
+
+  .pm-empty {
+    text-align: center;
+    padding: 48px 24px;
+    color: #5c5a72;
+  }
+
+  .pm-empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+
+  .pm-analytics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+    margin-top: 24px;
+  }
+
+  .pm-chart-card {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #2d2d44;
+    border-radius: 16px;
+    padding: 24px;
   }
 `;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// API SERVICE
+// ════════════════════════════════════════════════════════════════════════════════
 
-function daysUntil(dateStr: string): number {
-  return Math.floor((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
-}
+const PlanAPI = {
+  baseUrl: `${process.env.REACT_APP_API_URL}/api`,
 
-import axiosInstance from "../api/axiosInstance";
+  async getPlans(active?: boolean) {
+    const url = new URL(`${this.baseUrl}/admin/plans`);
+    if (active !== undefined) url.searchParams.append("active", String(active));
 
-async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const method = (options.method ?? "GET").toLowerCase() as "get"|"post"|"put"|"delete";
-  const body = options.body ? JSON.parse(options.body as string) : undefined;
-  const r = method === "get"
-    ? await axiosInstance.get(url)
-    : await (axiosInstance as any)[method](url, body);
-  return r.data as T;
-}
+    const response = await fetch(url, {
+      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
+    });
+    if (!response.ok) throw new Error("Failed to fetch plans");
+    const data = await response.json();
+    return data.data;
+  },
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+  async createPlan(plan: Partial<Plan>) {
+    const response = await fetch(`${this.baseUrl}/admin/plans`, {
+      method: "POST",
+      headers: {
+        "x-admin-token": localStorage.getItem("admin_token") || "",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(plan),
+    });
+    if (!response.ok) throw new Error("Failed to create plan");
+    const data = await response.json();
+    return data.data;
+  },
 
-interface StatCardProps {
-  icon: ReactNode;
-  label: string;
-  value: string | number;
-  glowColor: string;
-  iconBg: string;
-  iconColor: string;
-}
+  async updatePlan(planId: string, updates: Partial<Plan>) {
+    const response = await fetch(`${this.baseUrl}/admin/plans/${planId}`, {
+      method: "PUT",
+      headers: {
+        "x-admin-token": localStorage.getItem("admin_token") || "",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) throw new Error("Failed to update plan");
+    const data = await response.json();
+    return data.data;
+  },
 
-function StatCard({ icon, label, value, glowColor, iconBg, iconColor }: StatCardProps): JSX.Element {
-  return (
-    <div className="pm-stat">
-      <div className="pm-stat-glow" style={{ background: glowColor }} />
-      <div className="pm-stat-ico" style={{ background: iconBg, color: iconColor }}>
-        {icon}
-      </div>
-      <div className="pm-stat-val">{value}</div>
-      <div className="pm-stat-lbl">{label}</div>
-    </div>
-  );
-}
+  async deletePlan(planId: string) {
+    const response = await fetch(`${this.baseUrl}/admin/plans/${planId}`, {
+      method: "DELETE",
+      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
+    });
+    if (!response.ok) throw new Error("Failed to delete plan");
+  },
 
-function PlanBadge({ plan }: { plan: DriverPlan }): JSX.Element {
-  const entry = PLAN_TYPES.find((p) => p.value === plan.planType);
-  const modifier =
-    plan.planType === "premium"
-      ? "pm-badge-premium"
-      : plan.planType === "standard"
-      ? "pm-badge-standard"
-      : "pm-badge-basic";
+  async getAnalytics(from?: string, to?: string) {
+    const url = new URL(`${this.baseUrl}/admin/plans/analytics`);
+    if (from) url.searchParams.append("from", from);
+    if (to) url.searchParams.append("to", to);
 
-  return (
-    <span className={`pm-badge ${modifier}`}>
-      {entry?.icon} {plan.planName}
-    </span>
-  );
-}
+    const response = await fetch(url, {
+      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
+    });
+    if (!response.ok) throw new Error("Failed to fetch analytics");
+    const data = await response.json();
+    return data.data;
+  },
 
-function ExpiryCell({ date }: { date?: string }): JSX.Element {
-  if (date === undefined || date === "") {
-    return <span className="pm-muted">—</span>;
-  }
-  const d = daysUntil(date);
-  const fmt = new Date(date).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  if (d < 0)  return <span className="pm-exp-crit">Expired</span>;
-  if (d <= 3) return <span className="pm-exp-crit">&#x26A0; {fmt}</span>;
-  if (d <= 7) return <span className="pm-exp-warn">&#x23F3; {fmt}</span>;
-  return <span className="pm-exp-date">{fmt}</span>;
-}
+  async getRevenueStats(from?: string, to?: string) {
+    const url = new URL(`${this.baseUrl}/admin/plans/stats/revenue`);
+    if (from) url.searchParams.append("from", from);
+    if (to) url.searchParams.append("to", to);
 
-// ─── PlanForm ─────────────────────────────────────────────────────────────────
+    const response = await fetch(url, {
+      headers: { "x-admin-token": localStorage.getItem("admin_token") || "" },
+    });
+    if (!response.ok) throw new Error("Failed to fetch revenue stats");
+    const data = await response.json();
+    return data.data;
+  },
+};
 
-interface PlanFormProps {
-  plan: DriverPlan;
-  setPlan: (p: DriverPlan) => void;
-  benefits: string;
-  setBenefits: (s: string) => void;
-  isCreate?: boolean;
-}
+// ════════════════════════════════════════════════════════════════════════════════
+// COMPONENT
+// ════════════════════════════════════════════════════════════════════════════════
 
-function PlanForm({ plan, setPlan, benefits, setBenefits, isCreate }: PlanFormProps): JSX.Element {
-  function set<K extends keyof DriverPlan>(k: K, v: DriverPlan[K]): void {
-    setPlan({ ...plan, [k]: v });
-  }
+interface Props {}
 
-  return (
-    <>
-      <div className="pm-field">
-        <label className="pm-label">Plan Name</label>
-        <input
-          className="pm-input"
-          type="text"
-          value={plan.planName}
-          onChange={(e) => set("planName", e.target.value)}
-          placeholder="e.g., Gold Accelerator"
-        />
-      </div>
+export const PlanManagement: React.FC<Props> = () => {
+  const [activeTab, setActiveTab] = useState<"manage" | "analytics">("manage");
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<Plan | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
-      {isCreate === true && (
-        <div className="pm-field">
-          <label className="pm-label">Plan Type</label>
-          <select
-            className="pm-field-select"
-            value={plan.planType}
-            onChange={(e) => set("planType", e.target.value as PlanType)}
-          >
-            {PLAN_TYPES.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+  const [formData, setFormData] = useState<Partial<Plan>>({
+    planName: "",
+    planType: "basic",
+    commissionRate: 20,
+    bonusMultiplier: 1.0,
+    noCommission: false,
+    monthlyFee: 0,
+    planPrice: 299,
+    durationDays: 30,
+    description: "",
+    benefits: [],
+    isActive: true,
+  });
 
-      <div className="pm-grid2">
-        <div className="pm-field">
-          <label className="pm-label">Commission Rate (%)</label>
-          <input
-            className="pm-input"
-            type="number"
-            min={0}
-            max={100}
-            value={plan.commissionRate}
-            onChange={(e) => set("commissionRate", parseFloat(e.target.value) || 0)}
-          />
-        </div>
-        <div className="pm-field">
-          <label className="pm-label">Bonus Multiplier</label>
-          <input
-            className="pm-input"
-            type="number"
-            min={1}
-            step={0.1}
-            value={plan.bonusMultiplier}
-            onChange={(e) => set("bonusMultiplier", parseFloat(e.target.value) || 1)}
-          />
-        </div>
-      </div>
+  useEffect(() => {
+    if (activeTab === "manage") {
+      loadPlans();
+    } else {
+      loadAnalytics();
+    }
+  }, [activeTab]);
 
-      <div
-        className="pm-checkbox-row"
-        onClick={() => set("noCommission", !plan.noCommission)}
-      >
-        <input
-          type="checkbox"
-          checked={plan.noCommission}
-          onChange={(e) => set("noCommission", e.target.checked)}
-          onClick={(e: MouseEvent<HTMLInputElement>) => e.stopPropagation()}
-        />
-        <span>Zero Commission — driver keeps 100% of fare</span>
-      </div>
+  const loadPlans = async () => {
+    try {
+      setIsLoading(true);
+      const data = await PlanAPI.getPlans();
+      setPlans(data);
+    } catch (error) {
+      toast.error("Failed to load plans");
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      <div className="pm-field">
-        <label className="pm-label">Monthly Fee (₹)</label>
-        <input
-          className="pm-input"
-          type="number"
-          min={0}
-          value={plan.monthlyFee}
-          onChange={(e) => set("monthlyFee", parseFloat(e.target.value) || 0)}
-        />
-      </div>
+  const loadAnalytics = async () => {
+    try {
+      setIsLoading(true);
+      const data = await PlanAPI.getRevenueStats();
+      setAnalytics(data);
+    } catch (error) {
+      toast.error("Failed to load analytics");
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-      {isCreate === true && (
-        <div className="pm-field">
-          <label className="pm-label">Description</label>
-          <textarea
-            className="pm-textarea"
-            rows={2}
-            value={plan.description}
-            onChange={(e) => set("description", e.target.value)}
-            placeholder="Short plan summary..."
-          />
-        </div>
-      )}
+  const handleCreateNew = () => {
+    setEditingPlan(null);
+    setFormData({
+      planName: "",
+      planType: "basic",
+      commissionRate: 20,
+      bonusMultiplier: 1.0,
+      noCommission: false,
+      monthlyFee: 0,
+      planPrice: 299,
+      durationDays: 30,
+      description: "",
+      benefits: [],
+      isActive: true,
+    });
+    setShowForm(true);
+  };
 
-      <div className="pm-field">
-        <label className="pm-label">Benefits — one per line</label>
-        <textarea
-          className="pm-textarea"
-          rows={4}
-          value={benefits}
-          onChange={(e) => setBenefits(e.target.value)}
-          placeholder={"Priority dispatch\nBonus on peak hours\n24/7 dedicated support"}
-        />
-      </div>
-    </>
-  );
-}
+  const handleEdit = (plan: Plan) => {
+    setEditingPlan(plan);
+    setFormData(plan);
+    setShowForm(true);
+  };
 
-// ─── ModalShell ───────────────────────────────────────────────────────────────
+  const handleDelete = async (planId: string) => {
+    if (!window.confirm("Are you sure you want to delete this plan?")) return;
 
-interface ModalShellProps {
-  title: string;
-  subtitle: string;
-  onClose: () => void;
-  onSave: () => void;
-  saving: boolean;
-  saveLabel: string;
-  children: ReactNode;
-}
+    try {
+      await PlanAPI.deletePlan(planId);
+      toast.success("Plan deleted");
+      loadPlans();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to delete plan");
+    }
+  };
 
-function ModalShell({
-  title,
-  subtitle,
-  onClose,
-  onSave,
-  saving,
-  saveLabel,
-  children,
-}: ModalShellProps): JSX.Element {
-  const handleOverlay = (e: MouseEvent<HTMLDivElement>): void => {
-    if (e.target === e.currentTarget) {
-      onClose();
+  const handleSave = async () => {
+    try {
+      if (editingPlan) {
+        await PlanAPI.updatePlan(editingPlan._id, formData);
+        toast.success("Plan updated");
+      } else {
+        await PlanAPI.createPlan(formData);
+        toast.success("Plan created");
+      }
+      setShowForm(false);
+      loadPlans();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save plan");
+    }
+  };
+
+  const handleToggleActive = async (plan: Plan) => {
+    try {
+      await PlanAPI.updatePlan(plan._id, { isActive: !plan.isActive });
+      toast.success(
+        plan.isActive ? "Plan deactivated" : "Plan activated"
+      );
+      loadPlans();
+    } catch (error) {
+      toast.error("Failed to toggle plan status");
     }
   };
 
   return (
-    <div className="pm-overlay" onClick={handleOverlay}>
-      <div className="pm-modal">
-        <div className="pm-modal-hdr">
-          <div>
-            <div className="pm-modal-title">{title}</div>
-            <p className="pm-modal-sub">{subtitle}</p>
-          </div>
-          <button className="pm-close-btn" onClick={onClose}>
-            <X size={14} />
-          </button>
-        </div>
-
-        <div className="pm-modal-body">
-          {children}
-
-          <div className="pm-modal-footer">
-            <button className="pm-btn-cancel" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="pm-btn-save" onClick={onSave} disabled={saving}>
-              {saving ? (
-                <>
-                  <div className="pm-btn-spinner" />
-                  Saving&#8230;
-                </>
-              ) : (
-                <>
-                  <Sparkles size={13} />
-                  {saveLabel}
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Pagination ───────────────────────────────────────────────────────────────
-
-interface PaginationProps {
-  page: number;
-  total: number;
-  onChange: (p: number) => void;
-}
-
-function PaginationBar({ page, total, onChange }: PaginationProps): JSX.Element | null {
-  if (total <= 1) return null;
-
-  const allPages = Array.from({ length: total }, (_, i) => i + 1);
-  const visible = allPages.filter(
-    (n) => n === 1 || n === total || Math.abs(n - page) <= 1
-  );
-
-  const items: Array<number | "dots"> = [];
-  visible.forEach((n, i) => {
-    if (i > 0 && n - visible[i - 1] > 1) {
-      items.push("dots");
-    }
-    items.push(n);
-  });
-
-  return (
-    <div className="pm-pagination">
-      <button
-        className="pm-page-btn"
-        disabled={page === 1}
-        onClick={() => onChange(page - 1)}
-      >
-        &#8249;
-      </button>
-
-      {items.map((n, i) => {
-        if (n === "dots") {
-          return <span key={`d${i}`} className="pm-page-dots">&#8230;</span>;
-        }
-        return (
-          <button
-            key={n}
-            className={`pm-page-btn${n === page ? " active" : ""}`}
-            onClick={() => onChange(n as number)}
-          >
-            {n}
-          </button>
-        );
-      })}
-
-      <button
-        className="pm-page-btn"
-        disabled={page === total}
-        onClick={() => onChange(page + 1)}
-      >
-        &#8250;
-      </button>
-    </div>
-  );
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
-export default function PlanManagement(): JSX.Element {
-  const [statusF, setStatusF]                 = useState<string>("all");
-  const [q, setQ]                             = useState<string>("");
-  const [page, setPage]                       = useState<number>(1);
-  const [selectedDriver, setSelectedDriver]   = useState<DriverWithPlan | null>(null);
-  const [showEditModal, setShowEditModal]     = useState<boolean>(false);
-  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
-  const [editingPlan, setEditingPlan]         = useState<DriverPlan>(EMPTY_PLAN);
-  const [benefitsInput, setBenefitsInput]     = useState<string>("");
-  const [acting, setActing]                   = useState<boolean>(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-
-  const { drivers, loading, refetch: fetchData } = useDriversWithPlans(statusF, page);
-  const { planTemplates } = usePlanTemplates();
-
-  // ── API mutation calls ────────────────────────────────────────────────────
-
-  async function handleSavePlan(): Promise<void> {
-    if (editingPlan.planName.trim() === "") {
-      toast.error("Please fill all required fields");
-      return;
-    }
-    try {
-      setActing(true);
-
-      const benefits = benefitsInput.split("\n").map((b) => b.trim()).filter(Boolean);
-
-      // ─────────────────────────────────────────────────────────────────────
-      // FIX: route selection
-      //
-      //  selectedDriver !== null  &&  editingPlan.id !== ""
-      //    → updating an existing DriverPlan record
-      //    → PUT /api/admin/drivers/:driverId/plans/:driverPlanId
-      //
-      //  selectedDriver !== null  &&  editingPlan.id === ""
-      //    → assigning a brand-new plan to a driver
-      //    → POST /api/admin/drivers/:driverId/assign-plan   ← was broken before
-      //
-      //  selectedDriver === null
-      //    → creating a new Plan template
-      //    → POST /api/admin/plans
-      // ─────────────────────────────────────────────────────────────────────
-
-      if (selectedDriver !== null && editingPlan.id !== "") {
-        // ── Update existing driver plan ──────────────────────────────────
-        await apiFetch(
-          `/admin/drivers/${selectedDriver._id}/plans/${editingPlan.id}`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              ...editingPlan,
-              benefits,
-            }),
-          }
-        );
-        toast.success("Plan updated successfully");
-
-      } else if (selectedDriver !== null && editingPlan.id === "") {
-        // ── Assign plan template to driver ───────────────────────────────────
-        if (!selectedTemplateId) {
-          toast.error("Please select a plan template to assign");
-          setActing(false);
-          return;
-        }
-        await apiFetch(
-          `/admin/drivers/${selectedDriver._id}/assign-plan`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              planId: selectedTemplateId,
-              expiryDays: 30,
-            }),
-          }
-        );
-        toast.success("Plan assigned to driver successfully");
-
-      } else {
-        // ── Create new plan template ─────────────────────────────────────
-        await apiFetch("/admin/plans", {
-          method: "POST",
-          body: JSON.stringify({
-            ...editingPlan,
-            benefits,
-          }),
-        });
-        toast.success("Plan created successfully");
-      }
-
-      setShowEditModal(false);
-      setShowCreateModal(false);
-      void fetchData();
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Failed to save plan");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function handleAssignPlan(planId: string): Promise<void> {
-    if (selectedDriver === null) return;
-    try {
-      setActing(true);
-      await apiFetch(
-        `/admin/drivers/${selectedDriver._id}/assign-plan`,
-        {
-          method: "POST",
-          body: JSON.stringify({ planId, expiryDays: 30 }),
-        }
-      );
-      toast.success("Plan assigned to driver");
-      void fetchData();
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Failed to assign plan");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function handleDeactivatePlan(driverId: string, planId: string): Promise<void> {
-    if (!window.confirm("Deactivate this plan?")) return;
-    try {
-      setActing(true);
-      await apiFetch(
-        `/admin/drivers/${driverId}/plans/${planId}/deactivate`,
-        { method: "POST" }
-      );
-      toast.success("Plan deactivated");
-      void fetchData();
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Failed to deactivate plan");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  async function handleDeletePlan(planId: string): Promise<void> {
-    if (!window.confirm("Delete this plan template?")) return;
-    try {
-      setActing(true);
-      await apiFetch(`/admin/plans/${planId}`, { method: "DELETE" });
-      toast.success("Plan template deleted");
-      void fetchData();
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Failed to delete plan");
-    } finally {
-      setActing(false);
-    }
-  }
-
-  // ── Derived ──────────────────────────────────────────────────────────────────
-
-  const driversWithActivePlan = drivers.filter(
-    (d) => d.currentPlan?.isActive === true
-  );
-
-  const expiringSoon = drivers.filter((d) => {
-    if (d.currentPlan?.expiryDate === undefined) return false;
-    const days = daysUntil(d.currentPlan.expiryDate);
-    return days >= 0 && days <= 7;
-  });
-
-  const avgCommission =
-    drivers.length > 0
-      ? (
-          drivers.reduce(
-            (sum: number, d: DriverWithPlan) => sum + (d.currentPlan?.commissionRate ?? 20),
-            0
-          ) / drivers.length
-        ).toFixed(1)
-      : "0.0";
-
-  const filtered = useMemo<DriverWithPlan[]>(() => {
-    const lq = q.toLowerCase();
-    return drivers.filter((d) => {
-      const matchSearch =
-        (d.name?.toLowerCase().includes(lq) ?? false) ||
-        (d.phone?.includes(lq) ?? false) ||
-        (d.email?.toLowerCase().includes(lq) ?? false);
-
-      if (!matchSearch) return false;
-      if (statusF === "all") return true;
-
-      const isPlanActive = d.currentPlan?.isActive ?? false;
-      const isExpired =
-        d.currentPlan?.expiryDate !== undefined
-          ? new Date(d.currentPlan.expiryDate) < new Date()
-          : false;
-
-      if (statusF === "active")   return isPlanActive && !isExpired;
-      if (statusF === "inactive") return !isPlanActive;
-      if (statusF === "expired")  return isExpired;
-      return true;
-    });
-  }, [drivers, q, statusF]);
-
-  const totalPages = Math.ceil(filtered.length / PER);
-  const paged = filtered.slice((page - 1) * PER, page * PER);
-
-  // ── JSX ──────────────────────────────────────────────────────────────────────
-
-  return (
-    <>
+    <div className="pm">
       <style>{STYLES}</style>
 
-      <div className="pm">
-
-        {/* Header */}
-        <div className="pm-hdr">
-          <div>
-            <h1 className="pm-title">Plan Management</h1>
-            <p className="pm-sub">Commission structures · Driver tiers · Incentive plans</p>
-          </div>
+      {/* Header */}
+      <div className="pm-hdr">
+        <div>
+          <h1 className="pm-title">Plan Management</h1>
+          <p className="pm-sub">Create and manage driver incentive plans</p>
+        </div>
+        {activeTab === "manage" && (
           <button
             className="pm-btn-primary"
-            onClick={() => {
-              setSelectedDriver(null);
-              setEditingPlan(EMPTY_PLAN);
-              setBenefitsInput("");
-              setShowCreateModal(true);
+            onClick={handleCreateNew}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
             }}
           >
-            <Plus size={15} /> New Plan Template
+            <Plus size={18} />
+            New Plan
           </button>
-        </div>
-
-        {/* Stats */}
-        <div className="pm-stats">
-          <StatCard
-            icon={<Users size={16} />}
-            label="Total Drivers"
-            value={drivers.length}
-            glowColor="#6d28d9"
-            iconBg="rgba(109,40,217,.12)"
-            iconColor="#a78bfa"
-          />
-          <StatCard
-            icon={<TrendingUp size={16} />}
-            label="Active Plans"
-            value={driversWithActivePlan.length}
-            glowColor="#10b981"
-            iconBg="rgba(16,185,129,.12)"
-            iconColor="#34d399"
-          />
-          <StatCard
-            icon={<AlertTriangle size={16} />}
-            label="Expiring in 7 Days"
-            value={expiringSoon.length}
-            glowColor="#f59e0b"
-            iconBg="rgba(245,158,11,.12)"
-            iconColor="#fbbf24"
-          />
-          <StatCard
-            icon={<DollarSign size={16} />}
-            label="Avg Commission"
-            value={`${avgCommission}%`}
-            glowColor="#3b82f6"
-            iconBg="rgba(59,130,246,.12)"
-            iconColor="#60a5fa"
-          />
-        </div>
-
-        {/* Filters */}
-        <div className="pm-filters">
-          <div className="pm-search-wrap">
-            <span className="pm-search-ico">
-              <Users size={14} />
-            </span>
-            <input
-              className="pm-search"
-              value={q}
-              onChange={(e) => {
-                setQ(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Search by name, phone, or email..."
-            />
-          </div>
-
-          <select
-            className="pm-select"
-            value={statusF}
-            onChange={(e) => {
-              setStatusF(e.target.value);
-              setPage(1);
-            }}
-          >
-            {STATUS_FILTERS.map((f) => (
-              <option key={f.value} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-
-          <button className="pm-btn-sec" onClick={() => void fetchData()}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-        </div>
-
-        {/* Table */}
-        {loading ? (
-          <div className="pm-loading">
-            <div className="pm-spinner" />
-          </div>
-        ) : (
-          <div className="pm-table-card">
-            <table className="pm-table">
-              <thead>
-                <tr>
-                  <th style={{ width: "20%" }}>Driver</th>
-                  <th style={{ width: "16%" }}>Current Plan</th>
-                  <th style={{ width: "12%" }}>Commission</th>
-                  <th style={{ width: "11%" }}>Bonus</th>
-                  <th style={{ width: "11%" }}>Status</th>
-                  <th style={{ width: "13%" }}>Expires</th>
-                  <th style={{ width: "17%" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.length === 0 ? (
-                  <tr>
-                    <td colSpan={7}>
-                      <div className="pm-empty">
-                        <div className="pm-empty-emoji">&#x1FA90;</div>
-                        <div className="pm-empty-txt">No drivers match your filters</div>
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paged.map((driver) => (
-                    <tr key={driver._id}>
-                      <td>
-                        <div className="pm-driver-name">{driver.name}</div>
-                        <div className="pm-driver-phone">{driver.phone}</div>
-                      </td>
-
-                      <td>
-                        {driver.currentPlan !== undefined ? (
-                          <PlanBadge plan={driver.currentPlan} />
-                        ) : (
-                          <span className="pm-no-plan">No Plan</span>
-                        )}
-                      </td>
-
-                      <td>
-                        {driver.currentPlan?.noCommission === true ? (
-                          <span className="pm-badge pm-badge-nocomm">0%</span>
-                        ) : (
-                          <span className="pm-comm-val">
-                            {driver.currentPlan?.commissionRate ?? 20}%
-                          </span>
-                        )}
-                      </td>
-
-                      <td>
-                        {driver.currentPlan !== undefined &&
-                        driver.currentPlan.bonusMultiplier > 1 ? (
-                          <span className="pm-badge pm-badge-bonus">
-                            <ArrowUpRight size={10} />
-                            +{((driver.currentPlan.bonusMultiplier - 1) * 100).toFixed(0)}%
-                          </span>
-                        ) : (
-                          <span className="pm-muted">&#8212;</span>
-                        )}
-                      </td>
-
-                      <td>
-                        {driver.currentPlan?.isActive === true ? (
-                          <span className="pm-badge pm-badge-active">
-                            <CheckCircle size={10} /> Active
-                          </span>
-                        ) : (
-                          <span className="pm-badge pm-badge-inactive">
-                            <XCircle size={10} /> Inactive
-                          </span>
-                        )}
-                      </td>
-
-                      <td>
-                        <ExpiryCell date={driver.currentPlan?.expiryDate} />
-                      </td>
-
-                      <td>
-                        <div className="pm-actions">
-                          <button
-                            className="pm-action-btn"
-                            title="Edit plan"
-                            onClick={() => {
-                              setSelectedDriver(driver);
-                              setEditingPlan(driver.currentPlan ?? EMPTY_PLAN);
-                              setBenefitsInput(
-                                (driver.currentPlan?.benefits ?? []).join("\n")
-                              );
-                              setSelectedTemplateId("");
-                              setShowEditModal(true);
-                            }}
-                          >
-                            <Edit size={12} />
-                          </button>
-
-                          {driver.currentPlan?.isActive === true && (
-                            <button
-                              className="pm-action-btn pm-action-btn-danger"
-                              title="Deactivate plan"
-                              onClick={() =>
-                                void handleDeactivatePlan(
-                                  driver._id,
-                                  driver.currentPlan!.id
-                                )
-                              }
-                            >
-                              <XCircle size={12} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
         )}
-
-        {/* Pagination */}
-        <PaginationBar page={page} total={totalPages} onChange={setPage} />
-
-        {/* Edit Modal */}
-        {showEditModal && selectedDriver !== null && (
-          <ModalShell
-            title="Edit Plan"
-            subtitle={selectedDriver.name ?? ""}
-            onClose={() => setShowEditModal(false)}
-            onSave={() => void handleSavePlan()}
-            saving={acting}
-            saveLabel="Update Plan"
-          >
-            {selectedDriver.currentPlan !== undefined && (
-              <>
-                <p className="pm-section-lbl">Current Plan Details</p>
-                <div className="pm-info-grid">
-                  <div>
-                    <div className="pm-info-lbl">Plan Name</div>
-                    <div className="pm-info-val">{selectedDriver.currentPlan.planName}</div>
-                  </div>
-                  <div>
-                    <div className="pm-info-lbl">Commission</div>
-                    <div className="pm-info-val">{selectedDriver.currentPlan.commissionRate}%</div>
-                  </div>
-                  <div>
-                    <div className="pm-info-lbl">Bonus Multiplier</div>
-                    <div className="pm-info-val">{selectedDriver.currentPlan.bonusMultiplier}&#215;</div>
-                  </div>
-                  <div>
-                    <div className="pm-info-lbl">Monthly Fee</div>
-                    <div className="pm-info-val">&#8377;{selectedDriver.currentPlan.monthlyFee}</div>
-                  </div>
-                  {selectedDriver.currentPlan.activatedDate !== undefined && (
-                    <div>
-                      <div className="pm-info-lbl">Activated</div>
-                      <div className="pm-info-val">
-                        {new Date(selectedDriver.currentPlan.activatedDate).toLocaleDateString()}
-                      </div>
-                    </div>
-                  )}
-                  {selectedDriver.currentPlan.expiryDate !== undefined && (
-                    <div>
-                      <div className="pm-info-lbl">Expires</div>
-                      <div className="pm-info-val">
-                        {new Date(selectedDriver.currentPlan.expiryDate).toLocaleDateString()}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {/* Template selector — shown only when driver has NO plan yet */}
-            {selectedDriver.currentPlan === undefined && (
-              <div className="pm-field" style={{ marginBottom: "1rem" }}>
-                <label className="pm-label">Assign Plan Template</label>
-                <select
-                  className="pm-field-select"
-                  value={selectedTemplateId}
-                  onChange={(e) => setSelectedTemplateId(e.target.value)}
-                >
-                  <option value="">— Select a plan —</option>
-                  {planTemplates.map((t) => (
-                    <option key={t._id} value={t._id}>
-                      {t.planName} ({t.planType}) — {t.noCommission ? "0%" : `${t.commissionRate}%`} commission
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <p className="pm-section-lbl">Modify Plan</p>
-            <PlanForm
-              plan={editingPlan}
-              setPlan={setEditingPlan}
-              benefits={benefitsInput}
-              setBenefits={setBenefitsInput}
-            />
-          </ModalShell>
-        )}
-
-        {/* Create Modal */}
-        {showCreateModal && (
-          <ModalShell
-            title="New Plan Template"
-            subtitle="Define commission structure and benefits"
-            onClose={() => setShowCreateModal(false)}
-            onSave={() => void handleSavePlan()}
-            saving={acting}
-            saveLabel="Create Plan"
-          >
-            <PlanForm
-              plan={editingPlan}
-              setPlan={setEditingPlan}
-              benefits={benefitsInput}
-              setBenefits={setBenefitsInput}
-              isCreate
-            />
-          </ModalShell>
-        )}
-
       </div>
-    </>
+
+      {/* Tabs */}
+      <div className="pm-tabs">
+        <button
+          className={`pm-tab ${activeTab === "manage" ? "active" : ""}`}
+          onClick={() => setActiveTab("manage")}
+        >
+          Manage Plans
+        </button>
+        <button
+          className={`pm-tab ${activeTab === "analytics" ? "active" : ""}`}
+          onClick={() => setActiveTab("analytics")}
+        >
+          Analytics
+        </button>
+      </div>
+
+      {/* Form */}
+      {showForm && (
+        <div className="pm-form">
+          <h3 style={{ marginTop: 0, marginBottom: 20 }}>
+            {editingPlan ? "Edit Plan" : "Create New Plan"}
+          </h3>
+
+          <div className="pm-form-group">
+            <label>Plan Name *</label>
+            <input
+              type="text"
+              value={formData.planName || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, planName: e.target.value })
+              }
+              placeholder="e.g., Zero Commission Plus"
+            />
+          </div>
+
+          <div className="pm-form-row">
+            <div className="pm-form-group">
+              <label>Plan Type *</label>
+              <select
+                value={formData.planType}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    planType: e.target.value as any,
+                  })
+                }
+              >
+                <option value="basic">Basic</option>
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+              </select>
+            </div>
+            <div className="pm-form-group">
+              <label>Price (₹) *</label>
+              <input
+                type="number"
+                value={formData.planPrice || 0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    planPrice: parseFloat(e.target.value),
+                  })
+                }
+                placeholder="299"
+              />
+            </div>
+          </div>
+
+          <div className="pm-form-row">
+            <div className="pm-form-group">
+              <label>Duration (Days) *</label>
+              <input
+                type="number"
+                value={formData.durationDays || 30}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    durationDays: parseInt(e.target.value),
+                  })
+                }
+                placeholder="30"
+              />
+            </div>
+            <div className="pm-form-group">
+              <label>Commission Rate (%)</label>
+              <input
+                type="number"
+                value={formData.commissionRate || 20}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    commissionRate: parseFloat(e.target.value),
+                  })
+                }
+                disabled={formData.noCommission}
+                placeholder="20"
+              />
+            </div>
+          </div>
+
+          <div className="pm-form-row">
+            <div className="pm-form-group">
+              <label>Earnings Multiplier</label>
+              <input
+                type="number"
+                step="0.1"
+                value={formData.bonusMultiplier || 1.0}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    bonusMultiplier: parseFloat(e.target.value),
+                  })
+                }
+                placeholder="1.2"
+              />
+            </div>
+            <div className="pm-form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.noCommission || false}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      noCommission: e.target.checked,
+                    })
+                  }
+                />
+                {" "}No Commission
+              </label>
+            </div>
+          </div>
+
+          <div className="pm-form-group">
+            <label>Description</label>
+            <textarea
+              value={formData.description || ""}
+              onChange={(e) =>
+                setFormData({ ...formData, description: e.target.value })
+              }
+              placeholder="Plan description for drivers"
+              rows={3}
+            />
+          </div>
+
+          <div className="pm-form-group">
+            <label>Benefits (one per line)</label>
+            <textarea
+              value={(formData.benefits || []).join("\n")}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  benefits: e.target.value
+                    .split("\n")
+                    .filter((b) => b.trim()),
+                })
+              }
+              placeholder="0% commission&#10;1.2x earnings boost&#10;24/7 support"
+              rows={4}
+            />
+          </div>
+
+          <div className="pm-form-actions">
+            <button
+              className="pm-btn-save"
+              onClick={handleSave}
+            >
+              Save Plan
+            </button>
+            <button
+              className="pm-btn-cancel"
+              onClick={() => setShowForm(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Tab */}
+      {activeTab === "manage" && (
+        <>
+          {isLoading ? (
+            <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{
+                display: "inline-block",
+                width: 40,
+                height: 40,
+                border: "3px solid #a78bfa",
+                borderTop: "3px solid transparent",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }} />
+              <style>{`
+                @keyframes spin {
+                  to { transform: rotate(360deg); }
+                }
+              `}</style>
+            </div>
+          ) : plans.length === 0 ? (
+            <div className="pm-empty">
+              <div className="pm-empty-icon">📋</div>
+              <h3>No plans yet</h3>
+              <p>Create your first incentive plan to get started</p>
+              <button
+                className="pm-btn-primary"
+                onClick={handleCreateNew}
+                style={{ marginTop: 16 }}
+              >
+                Create Plan
+              </button>
+            </div>
+          ) : (
+            <div className="pm-list">
+              <div className="pm-list-header">
+                <div>Plan Name</div>
+                <div>Type</div>
+                <div>Commission</div>
+                <div>Price / Duration</div>
+                <div>Actions</div>
+              </div>
+              {plans.map((plan) => (
+                <div key={plan._id} className="pm-list-item">
+                  <div>
+                    <div className="pm-plan-name">{plan.planName}</div>
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        color: "#5c5a72",
+                        marginTop: 4,
+                      }}
+                    >
+                      {plan.totalPurchases || 0} purchases
+                    </div>
+                  </div>
+                  <div style={{ textTransform: "capitalize" }}>
+                    {plan.planType}
+                  </div>
+                  <div>
+                    {plan.noCommission
+                      ? "0%"
+                      : `${plan.commissionRate}%`}
+                  </div>
+                  <div>
+                    ₹{plan.planPrice} / {plan.durationDays}d
+                  </div>
+                  <div className="pm-actions">
+                    <button
+                      className="pm-action-btn"
+                      onClick={() =>
+                        handleToggleActive(plan)
+                      }
+                      title={plan.isActive ? "Deactivate" : "Activate"}
+                    >
+                      {plan.isActive ? (
+                        <Eye size={18} />
+                      ) : (
+                        <EyeOff size={18} />
+                      )}
+                    </button>
+                    <button
+                      className="pm-action-btn"
+                      onClick={() => handleEdit(plan)}
+                      title="Edit"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      className="pm-action-btn"
+                      onClick={() => handleDelete(plan._id)}
+                      title="Delete"
+                      style={{ color: "#ef4444" }}
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Analytics Tab */}
+      {activeTab === "analytics" && (
+        <>
+          {isLoading ? (
+            <div style={{ textAlign: "center", padding: "48px 24px" }}>
+              <div style={{
+                display: "inline-block",
+                width: 40,
+                height: 40,
+                border: "3px solid #a78bfa",
+                borderTop: "3px solid transparent",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite",
+              }} />
+            </div>
+          ) : analytics ? (
+            <div className="pm-analytics">
+              <div className="pm-card">
+                <div className="pm-card-stat">
+                  <div>
+                    <div className="pm-card-label">Total Revenue</div>
+                    <div className="pm-card-value">
+                      ₹{analytics.totalStats.totalRevenue.toLocaleString()}
+                    </div>
+                  </div>
+                  <DollarSign size={24} style={{ color: "#a78bfa" }} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "#5c5a72",
+                    marginTop: 8,
+                  }}
+                >
+                  {analytics.totalStats.totalPurchases} purchases
+                </div>
+              </div>
+
+              <div className="pm-card">
+                <div className="pm-card-stat">
+                  <div>
+                    <div className="pm-card-label">Avg Order Value</div>
+                    <div className="pm-card-value">
+                      ₹{analytics.totalStats.avgOrderValue.toFixed(0)}
+                    </div>
+                  </div>
+                  <TrendingUp size={24} style={{ color: "#a78bfa" }} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "#5c5a72",
+                    marginTop: 8,
+                  }}
+                >
+                  Failed: {analytics.failedPayments}
+                </div>
+              </div>
+
+              <div className="pm-card">
+                <div className="pm-card-stat">
+                  <div>
+                    <div className="pm-card-label">Adoption Rate</div>
+                    <div className="pm-card-value">
+                      {(
+                        (analytics.totalStats.totalPurchases / Math.max(1, plans.length)) *
+                        100
+                      ).toFixed(0)}
+                      %
+                    </div>
+                  </div>
+                  <Users size={24} style={{ color: "#a78bfa" }} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "#5c5a72",
+                    marginTop: 8,
+                  }}
+                >
+                  Active drivers
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {/* Revenue by Plan */}
+          {analytics && (
+            <div className="pm-list" style={{ marginTop: 24 }}>
+              <div className="pm-list-header">
+                <div>Plan</div>
+                <div>Revenue</div>
+                <div>Purchases</div>
+                <div>% of Total</div>
+              </div>
+              {analytics.revenueByPlan.map((item) => (
+                <div key={item.planName} className="pm-list-item">
+                  <div className="pm-plan-name">{item.planName}</div>
+                  <div>₹{item.revenue.toLocaleString()}</div>
+                  <div>{item.purchases}</div>
+                  <div style={{ color: "#a78bfa", fontWeight: 600 }}>
+                    {item.percentage}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
-}
+};
+
+export default PlanManagement;
