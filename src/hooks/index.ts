@@ -11,6 +11,7 @@ export function useApi<T>(url: string, deps: unknown[] = []) {
   const [error, setError]   = useState("");
 
   const fetch = useCallback(async () => {
+    if (!url) return;
     setLoad(true); setError("");
     try {
       const r = await axiosInstance.get(url, { headers: hdrs() });
@@ -128,7 +129,7 @@ export function usePayments() {
 
 // ─── Drivers with Plans ───────────────────────────────────────────────────────
 export function useDriversWithPlans(status = "all", page = 1) {
-  const url = `/admin/drivers/plans?status=${status}&page=${page}&_=${Date.now()}`;
+  const url = `/admin/drivers/plans?status=${status}&page=${page}`;
   const { data, loading, error, refetch } =
     useApi<{ data: any[]; pagination: any }>(url, [status, page]);
 

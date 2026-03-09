@@ -931,9 +931,7 @@ export default function PlanManagement(): JSX.Element {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   const { drivers, loading, refetch: fetchData } = useDriversWithPlans(statusF, page);
-  const { planTemplates, refetch: fetchPlanTemplates } = usePlanTemplates();
-
-  useEffect(() => { void fetchPlanTemplates(); }, []);
+  const { planTemplates } = usePlanTemplates();
 
   // ── API mutation calls ────────────────────────────────────────────────────
 
