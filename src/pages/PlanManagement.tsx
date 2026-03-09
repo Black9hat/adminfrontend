@@ -593,11 +593,13 @@ function getToken(): string {
  * Safe fetch helper — throws a readable error (never crashes on HTML responses).
  * Returns parsed JSON on success.
  */
+const API_BASE = "https://ghumobackend.onrender.com";
+
 async function apiFetch<T>(
   url: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}${url}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
