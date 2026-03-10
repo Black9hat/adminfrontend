@@ -60,7 +60,8 @@ const TYPE_COLORS: Record<string, string> = {
   premium: 'bg-purple-100 text-purple-800',
 };
 
-const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+const fmt = (n: number | null | undefined) =>
+  `₹${(n ?? 0).toLocaleString('en-IN')}`;
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,11 @@ const PlanManagement: React.FC = () => {
   const fetchStats = useCallback(async () => {
     try {
       const res = await planApi.getRevenueStats();
-      setStats(res.data.data);
+      // Handle both { data: { data: stats } } and { data: stats } response shapes
+      const payload = res.data?.data ?? res.data;
+      if (payload && typeof payload.totalRevenue === 'number') {
+        setStats(payload);
+      }
     } catch {
       // fallback: aggregate locally
     }
@@ -796,7 +801,7 @@ const PlanManagement: React.FC = () => {
                         <p className="font-medium">{item.driver?.name || '—'}</p>
                         <p className="text-xs text-gray-400">{item.driver?.phone}</p>
                       </td>
-                      <td className="px-4 py-2">{fmt(item.amountPaid)}</td>
+                      <td className="px-4 py-2">{fmt(item.amountPaid ?? 0)}</td>
                       <td className="px-4 py-2">
                         {new Date(item.createdAt).toLocaleDateString('en-IN')}
                       </td>
