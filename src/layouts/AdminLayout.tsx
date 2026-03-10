@@ -62,6 +62,7 @@ const GROUPS: NavGroup[] = [
       { path: "/promotions",      label: "Promo Codes",        icon: <Percent size={14} />    },
       { path: "/incentives",      label: "Incentives",         icon: <Gift size={14} />       },
       { path: "/plans",           label: "Driver Plans",       icon: <Gem size={14} />        }, // ✅ NEW
+      { path: "/driver-plan-purchases", label: "Plan Purchases", icon: <CreditCard size={14} /> },
       { path: "/coupons",         label: "Coupons",            icon: <Ticket size={14} />     },
     ],
   },
