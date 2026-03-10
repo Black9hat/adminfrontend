@@ -28,6 +28,7 @@ interface Plan {
   planType: "basic" | "standard" | "premium";
   commissionRate: number;
   bonusMultiplier: number;
+  extraEarningPerRide: number;
   noCommission: boolean;
   monthlyFee: number;
   planPrice: number;
@@ -418,10 +419,14 @@ export const PlanManagement: React.FC<Props> = () => {
     planType: "basic",
     commissionRate: 20,
     bonusMultiplier: 1.0,
+    extraEarningPerRide: 0,
     noCommission: false,
     monthlyFee: 0,
     planPrice: 299,
     durationDays: 30,
+    isTimeBasedPlan: false,
+    planStartTime: "06:00",
+    planEndTime: "23:00",
     description: "",
     benefits: [],
     isActive: true,
@@ -507,6 +512,10 @@ export const PlanManagement: React.FC<Props> = () => {
       return;
     }
 
+    const extraEarningPerRide = isNaN(Number(formData.extraEarningPerRide))
+      ? 0
+      : Math.max(0, Number(formData.extraEarningPerRide));
+
     const payload = {
       ...formData,
       planName: formData.planName.trim(),
@@ -514,6 +523,7 @@ export const PlanManagement: React.FC<Props> = () => {
       bonusMultiplier,
       planPrice,
       durationDays,
+      extraEarningPerRide,
     };
 
     if (editingPlan) {
@@ -687,6 +697,65 @@ export const PlanManagement: React.FC<Props> = () => {
             </div>
           </div>
 
+          {/* Extra Earning Per Ride + Time-Based Plan */}
+          <div className="pm-form-row">
+            <div className="pm-form-group">
+              <label>Extra Earning Per Ride (₹)</label>
+              <input
+                type="number"
+                min={0}
+                step="0.5"
+                value={formData.extraEarningPerRide ?? ""}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setFormData({ ...formData, extraEarningPerRide: isNaN(val) ? 0 : val });
+                }}
+                placeholder="0"
+              />
+            </div>
+            <div className="pm-form-group">
+              <div className="pm-checkbox-row">
+                <input
+                  type="checkbox"
+                  id="isTimeBasedPlan"
+                  checked={formData.isTimeBasedPlan ?? false}
+                  onChange={(e) =>
+                    setFormData({ ...formData, isTimeBasedPlan: e.target.checked })
+                  }
+                />
+                <label htmlFor="isTimeBasedPlan" style={{ cursor: "pointer", marginBottom: 0 }}>
+                  Time-Based Plan (restrict to specific hours)
+                </label>
+              </div>
+            </div>
+          </div>
+
+          {/* Time Window (shown only when isTimeBasedPlan = true) */}
+          {formData.isTimeBasedPlan && (
+            <div className="pm-form-row">
+              <div className="pm-form-group">
+                <label>Plan Start Time</label>
+                <input
+                  type="time"
+                  value={formData.planStartTime ?? "06:00"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, planStartTime: e.target.value })
+                  }
+                />
+              </div>
+              <div className="pm-form-group">
+                <label>Plan End Time</label>
+                <input
+                  type="time"
+                  value={formData.planEndTime ?? "23:00"}
+                  onChange={(e) =>
+                    setFormData({ ...formData, planEndTime: e.target.value })
+                  }
+                />
+              </div>
+            </div>
+          )}
+
           {/* Description */}
           <div className="pm-form-group">
             <label>Description</label>
@@ -753,8 +822,14 @@ export const PlanManagement: React.FC<Props> = () => {
                 <div key={plan._id} className="pm-list-item">
                   <div>
                     <div className="pm-plan-name">{plan.planName}</div>
-                    <div style={{ fontSize: "0.75rem", color: "#5c5a72", marginTop: 4 }}>
-                      {plan.totalPurchases || 0} purchases
+                    <div style={{ fontSize: "0.75rem", color: "#5c5a72", marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <span>{plan.totalPurchases || 0} purchases</span>
+                      {(plan.extraEarningPerRide ?? 0) > 0 && (
+                        <span style={{ color: "#10b981" }}>+₹{plan.extraEarningPerRide}/ride</span>
+                      )}
+                      {plan.isTimeBasedPlan && plan.planStartTime && plan.planEndTime && (
+                        <span style={{ color: "#f59e0b" }}>{plan.planStartTime}–{plan.planEndTime}</span>
+                      )}
                     </div>
                   </div>
                   <div style={{ textTransform: "capitalize" }}>{plan.planType}</div>
