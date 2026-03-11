@@ -1,7 +1,5 @@
 import axiosInstance from './axiosInstance';
 
-// ─── DTO types ───────────────────���────────────────────────────────────────────
-
 export interface CreatePlanDto {
   planName: string;
   planType: 'basic' | 'standard' | 'premium';
@@ -9,15 +7,16 @@ export interface CreatePlanDto {
   planPrice: number;
   durationDays: number;
   commissionRate: number;
-  bonusMultiplier: number;
   noCommission: boolean;
-  isTimeBasedPlan: boolean;
-  planStartTime?: string;
-  planEndTime?: string;
+  bonusMultiplier: number;
   benefits: string[];
+  monthlyFee: number;
+  isTimeBasedPlan: boolean;
+  planStartTime: string;
+  planEndTime: string;
+  planActivationDate: string | null;
+  planExpiryDate: string | null;
   isActive: boolean;
-  planActivationDate?: string;
-  planExpiryDate?: string;
 }
 
 export interface RevenueStats {
@@ -27,18 +26,12 @@ export interface RevenueStats {
   mostPopularPlan: { planName: string; totalPurchases: number } | null;
 }
 
-// ─── API layer ────────────────────────────────────────────────────────────────
-
 export const planApi = {
-  // Admin Plan CRUD
-  getPlans: (params?: { planType?: string; isActive?: string }) =>
+  getPlans: (params?: Record<string, string>) =>
     axiosInstance.get('/admin/plans', { params }),
 
   createPlan: (data: CreatePlanDto) =>
     axiosInstance.post('/admin/plans', data),
-
-  getPlanById: (planId: string) =>
-    axiosInstance.get(`/admin/plans/${planId}`),
 
   updatePlan: (planId: string, data: Partial<CreatePlanDto>) =>
     axiosInstance.put(`/admin/plans/${planId}`, data),
@@ -49,21 +42,21 @@ export const planApi = {
   togglePlan: (planId: string) =>
     axiosInstance.patch(`/admin/plans/${planId}/toggle`),
 
-  // Stats & Analytics
-  getRevenueStats: () =>
-    axiosInstance.get('/admin/plans/stats/revenue'),
-
   getAnalytics: () =>
     axiosInstance.get('/admin/plans/analytics'),
 
-  // Purchase History
+  getRevenueStats: () =>
+    axiosInstance.get('/admin/plans/stats/revenue'),
+
   getPurchaseHistory: (planId: string) =>
     axiosInstance.get(`/admin/plans/${planId}/purchases`),
 
-  // Driver Plan Management (Admin)
   getDriversWithPlans: () =>
-    axiosInstance.get('/admin/plans/drivers'),
+    axiosInstance.get('/admin/drivers/plans'),
 
-  deactivateDriverPlan: (driverPlanId: string) =>
-    axiosInstance.post(`/admin/driver-plans/${driverPlanId}/deactivate`),
+  assignPlanToDriver: (driverId: string, data: Record<string, unknown>) =>
+    axiosInstance.post(`/admin/drivers/${driverId}/assign-plan`, data),
+
+  deactivateDriverPlan: (driverId: string, driverPlanId: string) =>
+    axiosInstance.post(`/admin/drivers/${driverId}/plans/${driverPlanId}/deactivate`),
 };

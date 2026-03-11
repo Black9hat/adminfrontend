@@ -43,16 +43,17 @@ const EMPTY_FORM: CreatePlanDto = {
   commissionRate: 10,
   bonusMultiplier: 1.0,
   noCommission: false,
+  monthlyFee: 0,
   isTimeBasedPlan: false,
   planStartTime: '',
   planEndTime: '',
   benefits: [],
   isActive: true,
-  planActivationDate: '',
-  planExpiryDate: '',
+  planActivationDate: null,
+  planExpiryDate: null,
 };
 
-// ─── Helpers ──────────────────────────────────���───────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const TYPE_COLORS: Record<string, string> = {
   basic: 'bg-blue-100 text-blue-800',
@@ -63,20 +64,20 @@ const TYPE_COLORS: Record<string, string> = {
 const fmt = (n: number | null | undefined) =>
   `₹${(n ?? 0).toLocaleString('en-IN')}`;
 
+const fmtDate = (s?: string) =>
+  s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 const PlanManagement: React.FC = () => {
-  // ── State ──
   const [plans, setPlans] = useState<Plan[]>([]);
   const [stats, setStats] = useState<RevenueStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Filters
   const [filterType, setFilterType] = useState('');
   const [filterActive, setFilterActive] = useState('');
 
-  // Modal
   const [showModal, setShowModal] = useState(false);
   const [editPlan, setEditPlan] = useState<Plan | null>(null);
   const [form, setForm] = useState<CreatePlanDto>(EMPTY_FORM);
@@ -84,16 +85,15 @@ const PlanManagement: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
 
-  // Delete
   const [deleteTarget, setDeleteTarget] = useState<Plan | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Purchase history
   const [historyPlan, setHistoryPlan] = useState<Plan | null>(null);
   const [history, setHistory] = useState<PurchaseHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // ── Fetchers ──
+
   const fetchPlans = useCallback(async () => {
     try {
       const params: Record<string, string> = {};
@@ -109,7 +109,6 @@ const PlanManagement: React.FC = () => {
   const fetchStats = useCallback(async () => {
     try {
       const res = await planApi.getRevenueStats();
-      // Handle both { data: { data: stats } } and { data: stats } response shapes
       const payload = res.data?.data ?? res.data;
       if (payload && typeof payload.totalRevenue === 'number') {
         setStats(payload);
@@ -127,7 +126,6 @@ const PlanManagement: React.FC = () => {
     })();
   }, [fetchPlans, fetchStats]);
 
-  // ── Derived stats (fallback when endpoint unavailable) ──
   const derivedStats = useMemo(() => {
     if (stats) return stats;
     const totalRevenue = plans.reduce((s, p) => s + (p.totalRevenueGenerated || 0), 0);
@@ -147,7 +145,6 @@ const PlanManagement: React.FC = () => {
     };
   }, [stats, plans]);
 
-  // ── Filtered plans ──
   const filteredPlans = useMemo(() => {
     return plans.filter((p) => {
       if (filterType && p.planType !== filterType) return false;
@@ -157,26 +154,24 @@ const PlanManagement: React.FC = () => {
     });
   }, [plans, filterType, filterActive]);
 
-  // ── Form validation ──
+  // ── Validation ──
+
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
     if (!form.planName.trim()) errs.planName = 'Plan name is required';
     if (form.planPrice < 0) errs.planPrice = 'Price must be ≥ 0';
     if (form.durationDays < 1) errs.durationDays = 'Duration must be ≥ 1 day';
     if (!form.noCommission && (form.commissionRate < 0 || form.commissionRate > 100))
-      errs.commissionRate = 'Commission rate must be 0–100';
+      errs.commissionRate = 'Commission must be 0–100';
     if (form.bonusMultiplier < 1.0) errs.bonusMultiplier = 'Bonus multiplier must be ≥ 1.0';
-    if (
-      form.planActivationDate &&
-      form.planExpiryDate &&
-      new Date(form.planActivationDate) >= new Date(form.planExpiryDate)
-    )
+    if (form.planActivationDate && form.planExpiryDate && form.planActivationDate > form.planExpiryDate)
       errs.planExpiryDate = 'Expiry must be after activation date';
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
-  // ── Open create modal ──
+  // ── Modal open ──
+
   const openCreate = () => {
     setEditPlan(null);
     setForm(EMPTY_FORM);
@@ -185,7 +180,6 @@ const PlanManagement: React.FC = () => {
     setShowModal(true);
   };
 
-  // ── Open edit modal ──
   const openEdit = (plan: Plan) => {
     setEditPlan(plan);
     setForm({
@@ -197,28 +191,39 @@ const PlanManagement: React.FC = () => {
       commissionRate: plan.commissionRate,
       bonusMultiplier: plan.bonusMultiplier,
       noCommission: plan.noCommission,
+      monthlyFee: 0,
       isTimeBasedPlan: plan.isTimeBasedPlan,
       planStartTime: plan.planStartTime || '',
       planEndTime: plan.planEndTime || '',
       benefits: [...plan.benefits],
       isActive: plan.isActive,
-      planActivationDate: plan.planActivationDate ? plan.planActivationDate.slice(0, 10) : '',
-      planExpiryDate: plan.planExpiryDate ? plan.planExpiryDate.slice(0, 10) : '',
+      planActivationDate: plan.planActivationDate ? plan.planActivationDate.slice(0, 10) : null,
+      planExpiryDate: plan.planExpiryDate ? plan.planExpiryDate.slice(0, 10) : null,
     });
     setBenefitInput('');
     setFormErrors({});
     setShowModal(true);
   };
 
-  // ── Save (create or update) ──
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
     try {
+      const payload = {
+        ...form,
+        planPrice: Number(form.planPrice) || 0,
+        durationDays: Number(form.durationDays) || 30,
+        commissionRate: form.noCommission ? 0 : (Number(form.commissionRate) || 0),
+        bonusMultiplier: Number(form.bonusMultiplier) || 1.0,
+        planActivationDate: form.planActivationDate || null,
+        planExpiryDate: form.planExpiryDate || null,
+        planStartTime: form.isTimeBasedPlan ? form.planStartTime : '',
+        planEndTime: form.isTimeBasedPlan ? form.planEndTime : '',
+      };
       if (editPlan) {
-        await planApi.updatePlan(editPlan._id, form);
+        await planApi.updatePlan(editPlan._id, payload);
       } else {
-        await planApi.createPlan(form);
+        await planApi.createPlan(payload);
       }
       setShowModal(false);
       await Promise.all([fetchPlans(), fetchStats()]);
@@ -229,9 +234,7 @@ const PlanManagement: React.FC = () => {
     }
   };
 
-  // ── Toggle ──
   const handleToggle = async (plan: Plan) => {
-    // Optimistic update
     setPlans((prev) =>
       prev.map((p) => (p._id === plan._id ? { ...p, isActive: !p.isActive } : p))
     );
@@ -239,14 +242,12 @@ const PlanManagement: React.FC = () => {
       await planApi.togglePlan(plan._id);
       await fetchStats();
     } catch {
-      // Revert
       setPlans((prev) =>
         prev.map((p) => (p._id === plan._id ? { ...p, isActive: plan.isActive } : p))
       );
     }
   };
 
-  // ── Delete ──
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -261,7 +262,6 @@ const PlanManagement: React.FC = () => {
     }
   };
 
-  // ── Purchase history ──
   const openHistory = async (plan: Plan) => {
     setHistoryPlan(plan);
     setHistory([]);
@@ -276,7 +276,6 @@ const PlanManagement: React.FC = () => {
     }
   };
 
-  // ── Benefit helpers ──
   const addBenefit = () => {
     if (benefitInput.trim()) {
       setForm((f) => ({ ...f, benefits: [...f.benefits, benefitInput.trim()] }));
@@ -287,433 +286,333 @@ const PlanManagement: React.FC = () => {
     setForm((f) => ({ ...f, benefits: f.benefits.filter((_, idx) => idx !== i) }));
 
   // ── Render ──
+
   if (loading)
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh', background: '#08080f' }}>
+        <div style={{ color: '#a78bfa', fontSize: 18 }}>Loading plans…</div>
       </div>
     );
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Plan Management</h1>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-        >
-          + Create Plan
-        </button>
-      </div>
+    <>
+      <style>{`
+        .pm-wrap { background: #08080f; min-height: 100vh; padding: 28px; font-family: 'DM Sans', sans-serif; color: #e8e8f0; }
+        .pm-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .pm-title { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 700; color: #e8e8f0; }
+        .pm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
+        .pm-stat-card { background: linear-gradient(135deg,#1a1a2e,#16213e); border: 1px solid #2d2d44; border-radius: 12px; padding: 18px; }
+        .pm-stat-label { font-size: 12px; color: #9898b8; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px; }
+        .pm-stat-value { font-size: 22px; font-weight: 700; color: #a78bfa; }
+        .pm-filters { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+        .pm-select { background: #1a1a2e; border: 1px solid #2d2d44; color: #e8e8f0; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+        .pm-btn { padding: 8px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; border: none; font-size: 13px; transition: opacity .2s; }
+        .pm-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .pm-btn-primary { background: #7c3aed; color: #fff; }
+        .pm-btn-primary:hover:not(:disabled) { background: #6d28d9; }
+        .pm-btn-danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.3); }
+        .pm-btn-ghost { background: transparent; color: #9898b8; border: 1px solid #2d2d44; }
+        .pm-table-wrap { background: linear-gradient(135deg,#1a1a2e,#16213e); border: 1px solid #2d2d44; border-radius: 14px; overflow: auto; }
+        table.pm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .pm-table th { padding: 12px 16px; text-align: left; color: #9898b8; font-weight: 600; border-bottom: 1px solid #2d2d44; white-space: nowrap; }
+        .pm-table td { padding: 13px 16px; border-bottom: 1px solid #1a1a2e; vertical-align: middle; }
+        .pm-table tr:last-child td { border-bottom: none; }
+        .pm-table tr:hover td { background: rgba(167,139,250,.04); }
+        .pm-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+        .pm-badge-basic { background: rgba(29,78,216,.15); color: #60a5fa; }
+        .pm-badge-standard { background: rgba(184,95,0,.15); color: #f97316; }
+        .pm-badge-premium { background: rgba(124,58,237,.15); color: #a78bfa; }
+        .pm-toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+        .pm-toggle input { opacity: 0; width: 0; height: 0; }
+        .pm-toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #2d2d44; border-radius: 22px; transition: .3s; }
+        .pm-toggle-slider:before { content: ''; position: absolute; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: .3s; }
+        input:checked + .pm-toggle-slider { background: #7c3aed; }
+        input:checked + .pm-toggle-slider:before { transform: translateX(18px); }
+        /* Modal */
+        .pm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .pm-modal { background: #12121e; border: 1px solid #2d2d44; border-radius: 16px; width: 100%; max-width: 600px; max-height: 90vh; overflow-y: auto; }
+        .pm-modal-header { padding: 20px 24px 16px; border-bottom: 1px solid #2d2d44; display: flex; align-items: center; justify-content: space-between; }
+        .pm-modal-title { font-size: 18px; font-weight: 700; color: #e8e8f0; }
+        .pm-modal-body { padding: 20px 24px; }
+        .pm-modal-footer { padding: 16px 24px; border-top: 1px solid #2d2d44; display: flex; gap: 10px; justify-content: flex-end; }
+        .pm-form-group { margin-bottom: 16px; }
+        .pm-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+        .pm-label { display: block; font-size: 12px; color: #9898b8; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+        .pm-input { width: 100%; background: #1a1a2e; border: 1px solid #2d2d44; color: #e8e8f0; padding: 9px 12px; border-radius: 8px; font-size: 13px; box-sizing: border-box; }
+        .pm-input:focus { outline: none; border-color: #7c3aed; }
+        .pm-input.error { border-color: #ef4444; }
+        .pm-error-text { color: #ef4444; font-size: 11px; margin-top: 4px; }
+        .pm-checkbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; cursor: pointer; }
+        .pm-checkbox-row input { width: 16px; height: 16px; accent-color: #7c3aed; }
+        .pm-benefits-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .pm-benefit-tag { background: rgba(124,58,237,.15); border: 1px solid rgba(124,58,237,.3); color: #a78bfa; border-radius: 20px; padding: 3px 10px; font-size: 12px; display: flex; align-items: center; gap: 4px; }
+        .pm-benefit-remove { cursor: pointer; color: #ef4444; font-size: 14px; line-height: 1; }
+      `}</style>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-          {error}
+      <div className="pm-wrap">
+        {/* Header */}
+        <div className="pm-header">
+          <h1 className="pm-title">Driver Incentive Plans</h1>
+          <button className="pm-btn pm-btn-primary" onClick={openCreate}>+ Create Plan</button>
         </div>
-      )}
 
-      {/* Stats Banner */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Revenue', value: fmt(derivedStats.totalRevenue) },
-          { label: 'Total Purchases', value: derivedStats.totalPurchases },
-          { label: 'Active Plans', value: derivedStats.activePlansCount },
-          {
-            label: 'Most Popular',
-            value: derivedStats.mostPopularPlan?.planName || '—',
-          },
-        ].map((s) => (
-          <div key={s.label} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-            <p className="text-sm text-gray-500">{s.label}</p>
-            <p className="text-xl font-bold text-gray-900 mt-1 truncate">{s.value}</p>
+        {error && (
+          <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '10px 16px', marginBottom: 20, color: '#ef4444', fontSize: 13 }}>
+            {error}
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="">All Types</option>
-          <option value="basic">Basic</option>
-          <option value="standard">Standard</option>
-          <option value="premium">Premium</option>
-        </select>
-        <select
-          value={filterActive}
-          onChange={(e) => setFilterActive(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-        >
-          <option value="">All Status</option>
-          <option value="true">Active</option>
-          <option value="false">Inactive</option>
-        </select>
-      </div>
+        {/* Stats */}
+        <div className="pm-stats">
+          <div className="pm-stat-card">
+            <div className="pm-stat-label">Total Revenue</div>
+            <div className="pm-stat-value">{fmt(derivedStats.totalRevenue)}</div>
+          </div>
+          <div className="pm-stat-card">
+            <div className="pm-stat-label">Total Purchases</div>
+            <div className="pm-stat-value">{derivedStats.totalPurchases}</div>
+          </div>
+          <div className="pm-stat-card">
+            <div className="pm-stat-label">Active Plans</div>
+            <div className="pm-stat-value">{derivedStats.activePlansCount}</div>
+          </div>
+          <div className="pm-stat-card">
+            <div className="pm-stat-label">Most Popular</div>
+            <div className="pm-stat-value" style={{ fontSize: 14, paddingTop: 4 }}>
+              {derivedStats.mostPopularPlan?.planName ?? '—'}
+            </div>
+          </div>
+        </div>
 
-      {/* Plan Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              {['Name', 'Type', 'Price', 'Duration', 'Commission', 'Bonus', 'Purchases', 'Status', 'Actions'].map(
-                (h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    {h}
-                  </th>
-                )
-              )}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {filteredPlans.length === 0 ? (
+        {/* Filters */}
+        <div className="pm-filters">
+          <select className="pm-select" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="">All Types</option>
+            <option value="basic">Basic</option>
+            <option value="standard">Standard</option>
+            <option value="premium">Premium</option>
+          </select>
+          <select className="pm-select" value={filterActive} onChange={(e) => setFilterActive(e.target.value)}>
+            <option value="">All Status</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
+          <span style={{ color: '#9898b8', fontSize: 13 }}>{filteredPlans.length} plan{filteredPlans.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {/* Table */}
+        <div className="pm-table-wrap">
+          <table className="pm-table">
+            <thead>
               <tr>
-                <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
-                  No plans found
-                </td>
+                <th>Plan Name</th>
+                <th>Type</th>
+                <th>Price</th>
+                <th>Duration</th>
+                <th>Commission</th>
+                <th>Bonus</th>
+                <th>Purchases</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
-            ) : (
-              filteredPlans.map((plan) => (
-                <tr key={plan._id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-gray-900">{plan.planName}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${
-                        TYPE_COLORS[plan.planType] || 'bg-gray-100 text-gray-700'
-                      }`}
-                    >
-                      {plan.planType}
-                    </span>
+            </thead>
+            <tbody>
+              {filteredPlans.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: 'center', color: '#9898b8', padding: 32 }}>
+                    No plans found. Create one to get started.
                   </td>
-                  <td className="px-4 py-3">{fmt(plan.planPrice)}</td>
-                  <td className="px-4 py-3">{plan.durationDays}d</td>
-                  <td className="px-4 py-3">
-                    {plan.noCommission ? (
-                      <span className="text-green-600 font-semibold">0%</span>
-                    ) : (
-                      `${plan.commissionRate}%`
+                </tr>
+              ) : filteredPlans.map((plan) => (
+                <tr key={plan._id}>
+                  <td>
+                    <div style={{ fontWeight: 600, color: '#e8e8f0' }}>{plan.planName}</div>
+                    {plan.description && (
+                      <div style={{ color: '#9898b8', fontSize: 11, marginTop: 2 }}>
+                        {plan.description.slice(0, 50)}{plan.description.length > 50 ? '…' : ''}
+                      </div>
                     )}
                   </td>
-                  <td className="px-4 py-3">{plan.bonusMultiplier}x</td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => openHistory(plan)}
-                      className="text-blue-600 hover:underline"
-                    >
-                      {plan.totalPurchases}
-                    </button>
+                  <td>
+                    <span className={`pm-badge pm-badge-${plan.planType}`}>{plan.planType}</span>
                   </td>
-                  <td className="px-4 py-3">
-                    <label className="relative inline-flex items-center cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={plan.isActive}
-                        onChange={() => handleToggle(plan)}
-                        className="sr-only peer"
-                      />
-                      <div className="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-5 peer-checked:bg-green-500 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all" />
+                  <td style={{ color: '#a78bfa', fontWeight: 600 }}>{fmt(plan.planPrice)}</td>
+                  <td>{plan.durationDays}d</td>
+                  <td>{plan.noCommission ? <span style={{ color: '#10b981', fontWeight: 600 }}>0%</span> : `${plan.commissionRate}%`}</td>
+                  <td>{plan.bonusMultiplier}x</td>
+                  <td>{plan.totalPurchases}</td>
+                  <td>
+                    <label className="pm-toggle">
+                      <input type="checkbox" checked={plan.isActive} onChange={() => handleToggle(plan)} />
+                      <span className="pm-toggle-slider" />
                     </label>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => openEdit(plan)}
-                        className="text-xs px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(plan)}
-                        className="text-xs px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100"
-                        disabled={plan.totalPurchases > 0}
-                        title={
-                          plan.totalPurchases > 0
-                            ? 'Cannot delete — has purchases. Deactivate instead.'
-                            : 'Delete'
-                        }
-                      >
-                        Delete
-                      </button>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="pm-btn pm-btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }}
+                        onClick={() => openEdit(plan)}>Edit</button>
+                      <button className="pm-btn pm-btn-ghost" style={{ padding: '5px 10px', fontSize: 12 }}
+                        onClick={() => openHistory(plan)}>History</button>
+                      <button className="pm-btn pm-btn-danger" style={{ padding: '5px 10px', fontSize: 12 }}
+                        onClick={() => setDeleteTarget(plan)}>Delete</button>
                     </div>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* ── Create/Edit Modal ── */}
+      {/* ── Create / Edit Modal ── */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
-            <h2 className="text-lg font-bold text-gray-900">
-              {editPlan ? 'Edit Plan' : 'Create Plan'}
-            </h2>
-
-            {formErrors._general && (
-              <p className="text-sm text-red-600 bg-red-50 p-2 rounded">{formErrors._general}</p>
-            )}
-
-            {/* Basic Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Plan Name *</label>
-                <input
-                  className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                    formErrors.planName ? 'border-red-400' : 'border-gray-300'
-                  }`}
-                  value={form.planName}
-                  onChange={(e) => setForm((f) => ({ ...f, planName: e.target.value }))}
-                />
-                {formErrors.planName && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.planName}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Plan Type</label>
-                <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={form.planType}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, planType: e.target.value as CreatePlanDto['planType'] }))
-                  }
-                >
-                  <option value="basic">Basic</option>
-                  <option value="standard">Standard</option>
-                  <option value="premium">Premium</option>
-                </select>
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <textarea
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  rows={2}
-                  value={form.description}
-                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Price (₹) *</label>
-                <input
-                  type="number"
-                  min={0}
-                  className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                    formErrors.planPrice ? 'border-red-400' : 'border-gray-300'
-                  }`}
-                  value={form.planPrice}
-                  onChange={(e) => setForm((f) => ({ ...f, planPrice: Number(e.target.value) }))}
-                />
-                {formErrors.planPrice && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.planPrice}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Duration (days) *
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                    formErrors.durationDays ? 'border-red-400' : 'border-gray-300'
-                  }`}
-                  value={form.durationDays}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, durationDays: Number(e.target.value) }))
-                  }
-                />
-                {formErrors.durationDays && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.durationDays}</p>
-                )}
-              </div>
-              <div>
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-                  <input
-                    type="checkbox"
-                    checked={form.noCommission}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, noCommission: e.target.checked, commissionRate: 0 }))
-                    }
-                  />
-                  No Commission
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  disabled={form.noCommission}
-                  className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                    form.noCommission ? 'bg-gray-100' : ''
-                  } ${formErrors.commissionRate ? 'border-red-400' : 'border-gray-300'}`}
-                  value={form.commissionRate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, commissionRate: Number(e.target.value) }))
-                  }
-                  placeholder="Commission Rate %"
-                />
-                {formErrors.commissionRate && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.commissionRate}</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Bonus Multiplier *
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  step={0.1}
-                  className={`w-full border rounded-lg px-3 py-2 text-sm ${
-                    formErrors.bonusMultiplier ? 'border-red-400' : 'border-gray-300'
-                  }`}
-                  value={form.bonusMultiplier}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, bonusMultiplier: Number(e.target.value) }))
-                  }
-                />
-                {formErrors.bonusMultiplier && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.bonusMultiplier}</p>
-                )}
-              </div>
+        <div className="pm-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}>
+          <div className="pm-modal">
+            <div className="pm-modal-header">
+              <div className="pm-modal-title">{editPlan ? 'Edit Plan' : 'Create New Plan'}</div>
+              <button className="pm-btn pm-btn-ghost" style={{ padding: '4px 10px' }} onClick={() => setShowModal(false)}>✕</button>
             </div>
+            <div className="pm-modal-body">
+              {formErrors._general && (
+                <div style={{ background: 'rgba(239,68,68,.1)', border: '1px solid rgba(239,68,68,.3)', borderRadius: 8, padding: '8px 14px', marginBottom: 14, color: '#ef4444', fontSize: 13 }}>
+                  {formErrors._general}
+                </div>
+              )}
 
-            {/* Time-based toggle */}
-            <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={form.isTimeBasedPlan}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, isTimeBasedPlan: e.target.checked }))
-                  }
-                />
-                Time-based Plan
+              <div className="pm-form-row">
+                <div>
+                  <label className="pm-label">Plan Name *</label>
+                  <input className={`pm-input${formErrors.planName ? ' error' : ''}`} value={form.planName}
+                    onChange={(e) => setForm((f) => ({ ...f, planName: e.target.value }))} placeholder="e.g. Zero Commission Plan" />
+                  {formErrors.planName && <div className="pm-error-text">{formErrors.planName}</div>}
+                </div>
+                <div>
+                  <label className="pm-label">Plan Type</label>
+                  <select className="pm-input" value={form.planType}
+                    onChange={(e) => setForm((f) => ({ ...f, planType: e.target.value as any }))}>
+                    <option value="basic">Basic</option>
+                    <option value="standard">Standard</option>
+                    <option value="premium">Premium</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="pm-form-group">
+                <label className="pm-label">Description</label>
+                <textarea className="pm-input" rows={2} value={form.description}
+                  onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="Brief description of this plan" style={{ resize: 'vertical' }} />
+              </div>
+
+              <div className="pm-form-row">
+                <div>
+                  <label className="pm-label">Price (₹) *</label>
+                  <input type="number" min={0} className={`pm-input${formErrors.planPrice ? ' error' : ''}`}
+                    value={form.planPrice}
+                    onChange={(e) => setForm((f) => ({ ...f, planPrice: parseFloat(e.target.value) || 0 }))} />
+                  {formErrors.planPrice && <div className="pm-error-text">{formErrors.planPrice}</div>}
+                </div>
+                <div>
+                  <label className="pm-label">Duration (Days) *</label>
+                  <input type="number" min={1} className={`pm-input${formErrors.durationDays ? ' error' : ''}`}
+                    value={form.durationDays}
+                    onChange={(e) => setForm((f) => ({ ...f, durationDays: parseInt(e.target.value) || 1 }))} />
+                  {formErrors.durationDays && <div className="pm-error-text">{formErrors.durationDays}</div>}
+                </div>
+              </div>
+
+              <label className="pm-checkbox-row">
+                <input type="checkbox" checked={form.noCommission}
+                  onChange={(e) => setForm((f) => ({ ...f, noCommission: e.target.checked, commissionRate: e.target.checked ? 0 : f.commissionRate }))} />
+                <span style={{ color: '#e8e8f0', fontSize: 13 }}>Zero Commission Plan (0% commission on all rides)</span>
+              </label>
+
+              <div className="pm-form-row">
+                <div>
+                  <label className="pm-label">Commission Rate (%)</label>
+                  <input type="number" min={0} max={100} disabled={form.noCommission}
+                    className={`pm-input${formErrors.commissionRate ? ' error' : ''}`}
+                    style={form.noCommission ? { opacity: 0.4 } : {}}
+                    value={form.noCommission ? 0 : form.commissionRate}
+                    onChange={(e) => setForm((f) => ({ ...f, commissionRate: parseFloat(e.target.value) || 0 }))} />
+                  {formErrors.commissionRate && <div className="pm-error-text">{formErrors.commissionRate}</div>}
+                </div>
+                <div>
+                  <label className="pm-label">Bonus Multiplier</label>
+                  <input type="number" min={1} step={0.1} className={`pm-input${formErrors.bonusMultiplier ? ' error' : ''}`}
+                    value={form.bonusMultiplier}
+                    onChange={(e) => setForm((f) => ({ ...f, bonusMultiplier: parseFloat(e.target.value) || 1.0 }))} />
+                  {formErrors.bonusMultiplier && <div className="pm-error-text">{formErrors.bonusMultiplier}</div>}
+                </div>
+              </div>
+
+              {/* Benefits */}
+              <div className="pm-form-group">
+                <label className="pm-label">Benefits</label>
+                <div className="pm-benefits-list">
+                  {form.benefits.map((b, i) => (
+                    <span key={i} className="pm-benefit-tag">
+                      {b} <span className="pm-benefit-remove" onClick={() => removeBenefit(i)}>×</span>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="pm-input" style={{ flex: 1 }} placeholder="e.g. Zero commission" value={benefitInput}
+                    onChange={(e) => setBenefitInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBenefit(); } }} />
+                  <button className="pm-btn pm-btn-ghost" onClick={addBenefit}>Add</button>
+                </div>
+              </div>
+
+              {/* Time-based plan */}
+              <label className="pm-checkbox-row">
+                <input type="checkbox" checked={form.isTimeBasedPlan}
+                  onChange={(e) => setForm((f) => ({ ...f, isTimeBasedPlan: e.target.checked }))} />
+                <span style={{ color: '#e8e8f0', fontSize: 13 }}>Time-Based Plan (restrict benefits to specific hours)</span>
               </label>
               {form.isTimeBasedPlan && (
-                <div className="grid grid-cols-2 gap-4 mt-2">
+                <div className="pm-form-row" style={{ marginTop: 0 }}>
                   <div>
-                    <label className="block text-xs text-gray-600 mb-1">Start Time</label>
-                    <input
-                      type="time"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      value={form.planStartTime}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, planStartTime: e.target.value }))
-                      }
-                    />
+                    <label className="pm-label">Start Time</label>
+                    <input type="time" className="pm-input" value={form.planStartTime}
+                      onChange={(e) => setForm((f) => ({ ...f, planStartTime: e.target.value }))} />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-600 mb-1">End Time</label>
-                    <input
-                      type="time"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      value={form.planEndTime}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, planEndTime: e.target.value }))
-                      }
-                    />
+                    <label className="pm-label">End Time</label>
+                    <input type="time" className="pm-input" value={form.planEndTime}
+                      onChange={(e) => setForm((f) => ({ ...f, planEndTime: e.target.value }))} />
                   </div>
                 </div>
               )}
+
+              {/* Offer window */}
+              <div className="pm-form-row">
+                <div>
+                  <label className="pm-label">Offer Activation Date</label>
+                  <input type="date" className="pm-input" value={form.planActivationDate || ''}
+                    onChange={(e) => setForm((f) => ({ ...f, planActivationDate: e.target.value || null }))} />
+                  <div style={{ color: '#9898b8', fontSize: 11, marginTop: 3 }}>Leave blank = always available</div>
+                </div>
+                <div>
+                  <label className="pm-label">Offer Expiry Date</label>
+                  <input type="date" className={`pm-input${formErrors.planExpiryDate ? ' error' : ''}`}
+                    value={form.planExpiryDate || ''}
+                    onChange={(e) => setForm((f) => ({ ...f, planExpiryDate: e.target.value || null }))} />
+                  {formErrors.planExpiryDate && <div className="pm-error-text">{formErrors.planExpiryDate}</div>}
+                  <div style={{ color: '#9898b8', fontSize: 11, marginTop: 3 }}>Leave blank = never expires</div>
+                </div>
+              </div>
+
+              {/* Active toggle */}
+              <label className="pm-checkbox-row">
+                <input type="checkbox" checked={form.isActive}
+                  onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))} />
+                <span style={{ color: '#e8e8f0', fontSize: 13 }}>Plan is active (visible to drivers)</span>
+              </label>
             </div>
-
-            {/* Offer window */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Offer Activation Date
-                </label>
-                <input
-                  type="date"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={form.planActivationDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, planActivationDate: e.target.value }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Offer Expiry Date
-                </label>
-                <input
-                  type="date"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={form.planExpiryDate}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, planExpiryDate: e.target.value }))
-                  }
-                />
-                {formErrors.planExpiryDate && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.planExpiryDate}</p>
-                )}
-              </div>
-            </div>
-
-            {/* Benefits */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Benefits</label>
-              <div className="flex gap-2 mb-2">
-                <input
-                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={benefitInput}
-                  onChange={(e) => setBenefitInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addBenefit())}
-                  placeholder="Type a benefit and press Enter"
-                />
-                <button
-                  type="button"
-                  onClick={addBenefit}
-                  className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
-                >
-                  Add
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {form.benefits.map((b, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs"
-                  >
-                    {b}
-                    <button onClick={() => removeBenefit(i)} className="hover:text-red-500 ml-1">
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {/* Active toggle */}
-            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-              <input
-                type="checkbox"
-                checked={form.isActive}
-                onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
-              />
-              Plan is Active
-            </label>
-
-            {/* Actions */}
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-              >
+            <div className="pm-modal-footer">
+              <button className="pm-btn pm-btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="pm-btn pm-btn-primary" disabled={saving} onClick={handleSave}>
                 {saving ? 'Saving…' : editPlan ? 'Update Plan' : 'Create Plan'}
               </button>
             </div>
@@ -721,36 +620,28 @@ const PlanManagement: React.FC = () => {
         </div>
       )}
 
-      {/* ── Delete Confirmation Modal ── */}
+      {/* ── Delete Confirm Modal ── */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <h2 className="text-lg font-bold text-gray-900">Delete Plan</h2>
-            {deleteTarget.totalPurchases > 0 ? (
-              <p className="text-sm text-red-600">
-                ⚠️ This plan has been purchased {deleteTarget.totalPurchases} time(s) and cannot be
-                deleted. Please deactivate it instead.
-              </p>
-            ) : (
-              <p className="text-sm text-gray-600">
-                Are you sure you want to delete{' '}
-                <span className="font-semibold">{deleteTarget.planName}</span>? This action cannot
-                be undone.
-              </p>
-            )}
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setDeleteTarget(null)}
-                className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
+        <div className="pm-overlay" onClick={(e) => { if (e.target === e.currentTarget) setDeleteTarget(null); }}>
+          <div className="pm-modal" style={{ maxWidth: 420 }}>
+            <div className="pm-modal-header">
+              <div className="pm-modal-title">Delete Plan</div>
+            </div>
+            <div className="pm-modal-body">
+              {deleteTarget.totalPurchases > 0 ? (
+                <div style={{ color: '#f59e0b', fontSize: 14 }}>
+                  ⚠️ This plan has <strong>{deleteTarget.totalPurchases}</strong> purchase(s). You cannot delete it.
+                </div>
+              ) : (
+                <div style={{ color: '#e8e8f0', fontSize: 14 }}>
+                  Are you sure you want to delete <strong>{deleteTarget.planName}</strong>? This action cannot be undone.
+                </div>
+              )}
+            </div>
+            <div className="pm-modal-footer">
+              <button className="pm-btn pm-btn-ghost" onClick={() => setDeleteTarget(null)}>Cancel</button>
               {deleteTarget.totalPurchases === 0 && (
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-                >
+                <button className="pm-btn pm-btn-danger" disabled={deleting} onClick={handleDelete}>
                   {deleting ? 'Deleting…' : 'Delete'}
                 </button>
               )}
@@ -761,75 +652,58 @@ const PlanManagement: React.FC = () => {
 
       {/* ── Purchase History Modal ── */}
       {historyPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-900">
-                Purchase History — {historyPlan.planName}
-              </h2>
-              <button
-                onClick={() => setHistoryPlan(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ×
-              </button>
+        <div className="pm-overlay" onClick={(e) => { if (e.target === e.currentTarget) setHistoryPlan(null); }}>
+          <div className="pm-modal" style={{ maxWidth: 700 }}>
+            <div className="pm-modal-header">
+              <div className="pm-modal-title">Purchase History — {historyPlan.planName}</div>
+              <button className="pm-btn pm-btn-ghost" style={{ padding: '4px 10px' }} onClick={() => setHistoryPlan(null)}>✕</button>
             </div>
-            {historyLoading ? (
-              <div className="flex justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
-              </div>
-            ) : history.length === 0 ? (
-              <p className="text-center text-gray-400 py-8">No purchases yet</p>
-            ) : (
-              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    {['Driver', 'Amount Paid', 'Purchase Date', 'Status', 'Valid Till'].map((h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {history.map((item) => (
-                    <tr key={item._id}>
-                      <td className="px-4 py-2">
-                        <p className="font-medium">{item.driver?.name || '—'}</p>
-                        <p className="text-xs text-gray-400">{item.driver?.phone}</p>
-                      </td>
-                      <td className="px-4 py-2">{fmt(item.amountPaid ?? 0)}</td>
-                      <td className="px-4 py-2">
-                        {new Date(item.createdAt).toLocaleDateString('en-IN')}
-                      </td>
-                      <td className="px-4 py-2">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                            item.paymentStatus === 'completed'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-yellow-100 text-yellow-700'
-                          }`}
-                        >
-                          {item.paymentStatus}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2">
-                        {item.expiryDate
-                          ? new Date(item.expiryDate).toLocaleDateString('en-IN')
-                          : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+            <div className="pm-modal-body">
+              {historyLoading ? (
+                <div style={{ textAlign: 'center', color: '#9898b8', padding: 24 }}>Loading…</div>
+              ) : history.length === 0 ? (
+                <div style={{ textAlign: 'center', color: '#9898b8', padding: 24 }}>No purchases found.</div>
+              ) : (
+                <div className="pm-table-wrap">
+                  <table className="pm-table">
+                    <thead>
+                      <tr>
+                        <th>Driver</th>
+                        <th>Phone</th>
+                        <th>Amount Paid</th>
+                        <th>Purchase Date</th>
+                        <th>Valid Till</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.map((h) => (
+                        <tr key={h._id}>
+                          <td>{h.driver?.name || '—'}</td>
+                          <td>{h.driver?.phone || '—'}</td>
+                          <td style={{ color: '#a78bfa', fontWeight: 600 }}>{fmt(h.amountPaid)}</td>
+                          <td>{fmtDate(h.createdAt)}</td>
+                          <td>{fmtDate(h.expiryDate)}</td>
+                          <td>
+                            <span style={{
+                              background: h.paymentStatus === 'completed' ? 'rgba(16,185,129,.15)' : 'rgba(245,158,11,.15)',
+                              color: h.paymentStatus === 'completed' ? '#10b981' : '#f59e0b',
+                              padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                            }}>
+                              {h.paymentStatus}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
