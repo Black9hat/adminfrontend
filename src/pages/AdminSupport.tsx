@@ -27,20 +27,21 @@ import {
   PhoneCall,
   ExternalLink,
   Award,
-  Search  // ✅ Added Search icon
+  Search
 } from 'lucide-react';
 
 const API_BASE = 'https://ghumobackend.onrender.com';
 const getAuthToken = () => localStorage.getItem("adminToken") || "";
 
+// ✅ FIX: Removed Cache-Control and Pragma headers.
+// These are not whitelisted in the backend CORS config, causing preflight failures.
+// Cache-busting is handled via ?t= query params on individual requests instead.
 const getApiHeaders = () => {
   const token = getAuthToken();
   return {
     Authorization: `Bearer ${token}`,
     "ngrok-skip-browser-warning": "true",
     "Content-Type": "application/json",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache"
   };
 };
 
@@ -160,7 +161,7 @@ export default function AdminSupport() {
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   const [filter, setFilter] = useState<'all' | 'sos' | 'critical' | 'high' | 'medium' | 'low'>('all');
   const [activeTab, setActiveTab] = useState<'customer' | 'driver'>('customer');
-  const [searchQuery, setSearchQuery] = useState(''); // ✅ Added search state
+  const [searchQuery, setSearchQuery] = useState('');
   
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -177,7 +178,8 @@ export default function AdminSupport() {
 
   const fetchSupportTrips = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/support/admin/active`, {
+      // ✅ Cache-bust via query param instead of headers
+      const res = await axios.get(`${API_BASE}/api/support/admin/active?t=${Date.now()}`, {
         headers: getApiHeaders()
       });
       const tripData = Array.isArray(res.data?.requests) ? res.data.requests : [];
@@ -191,7 +193,8 @@ export default function AdminSupport() {
 
   const fetchDriverTickets = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/api/support/driver/tickets`, {
+      // ✅ Cache-bust via query param instead of headers
+      const res = await axios.get(`${API_BASE}/api/support/driver/tickets?t=${Date.now()}`, {
         headers: getApiHeaders()
       });
       const tickets = Array.isArray(res.data?.tickets) ? res.data.tickets : [];
@@ -530,12 +533,8 @@ export default function AdminSupport() {
     };
   }, [token]);
 
-  // ✅ Filter with Search
   const filteredCustomerTrips = trips.filter(trip => {
-    // Priority filter
     const passesFilter = filter === 'all' ? true : filter === 'sos' ? trip.isSOS : trip.priority === filter;
-    
-    // Search filter
     const searchLower = searchQuery.toLowerCase().trim();
     const passesSearch = searchLower === '' ? true : 
       trip._id.toLowerCase().includes(searchLower) ||
@@ -543,22 +542,17 @@ export default function AdminSupport() {
       trip.customerId?.name?.toLowerCase().includes(searchLower) ||
       trip.customerId?.phone?.includes(searchLower) ||
       trip.issueType?.toLowerCase().includes(searchLower);
-    
     return passesFilter && passesSearch;
   });
 
   const filteredDriverTickets = driverTickets.filter(ticket => {
-    // Priority filter
     const passesFilter = filter === 'all' ? true : ticket.priority === filter;
-    
-    // Search filter
     const searchLower = searchQuery.toLowerCase().trim();
     const passesSearch = searchLower === '' ? true :
       ticket._id.toLowerCase().includes(searchLower) ||
       ticket.driverName?.toLowerCase().includes(searchLower) ||
       ticket.driverPhone?.includes(searchLower) ||
       ticket.issueType?.toLowerCase().includes(searchLower);
-    
     return passesFilter && passesSearch;
   });
 
@@ -593,7 +587,7 @@ export default function AdminSupport() {
             </div>
           </div>
 
-          {/* ✅ Search Box */}
+          {/* Search Box */}
           <div className="relative mb-4">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="w-4 h-4 text-indigo-300" />
@@ -679,9 +673,7 @@ export default function AdminSupport() {
           <span className="text-sm text-slate-500">
             {activeTab === 'customer' ? filteredCustomerTrips.length : filteredDriverTickets.length} active tickets
             {searchQuery && (
-              <span className="text-indigo-600 ml-1">
-                (filtered)
-              </span>
+              <span className="text-indigo-600 ml-1">(filtered)</span>
             )}
           </span>
           <button
@@ -763,7 +755,6 @@ export default function AdminSupport() {
                         </span>
                       </div>
                       
-                      {/* ✅ Show Ticket ID */}
                       <div className="mb-2">
                         <span className="text-xs text-slate-400 font-mono bg-slate-100 px-2 py-0.5 rounded">
                           #{trip.supportRequestId?.slice(-8) || trip._id.slice(-8)}
@@ -859,7 +850,6 @@ export default function AdminSupport() {
                         </span>
                       </div>
                       
-                      {/* ✅ Show Ticket ID */}
                       <div className="mb-2">
                         <span className="text-xs text-slate-400 font-mono bg-slate-100 px-2 py-0.5 rounded">
                           #{ticket._id.slice(-8)}
@@ -900,7 +890,7 @@ export default function AdminSupport() {
         </div>
       </div>
 
-      {/* RIGHT PANEL - Same as before */}
+      {/* RIGHT PANEL */}
       <div className="flex-1 flex flex-col bg-slate-50 h-full overflow-hidden">
         {!selectedTrip && !selectedTicket ? (
           <div className="flex-1 flex items-center justify-center">
