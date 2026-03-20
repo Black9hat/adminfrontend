@@ -24,9 +24,9 @@ const LegalCompliance    = lazy(() => import("./pages/LegalCompliance"));
 const UserManagement   = lazy(() => import("./pages/UserRatingsTech").then(m => ({ default: m.UserManagement })));
 const RatingsReviews   = lazy(() => import("./pages/UserRatingsTech").then(m => ({ default: m.RatingsReviews })));
 const TechMonitoring   = lazy(() => import("./pages/UserRatingsTech").then(m => ({ default: m.TechnicalMonitoring })));
-const GPSMonitoring    = lazy(() => import("./pages/GPSSafetyParcel").then(m => ({ default: m.GPSMonitoring })));
-const SafetyComplaints = lazy(() => import("./pages/GPSSafetyParcel").then(m => ({ default: m.SafetyComplaints })));
-const ParcelManagement = lazy(() => import("./pages/GPSSafetyParcel").then(m => ({ default: m.ParcelManagement })));
+const GPSMonitoring    = lazy(() => import("./pages/SOSmonitoring"));
+const SafetyComplaints = lazy(() => import("./pages/SOSmonitoring"));
+const ParcelManagement = lazy(() => import("./pages/SOSmonitoring"));
 const FarePricing      = lazy(() => import("./pages/FareFraud").then(m => ({ default: m.FarePricing })));
 const FraudDetection   = lazy(() => import("./pages/FareFraud").then(m => ({ default: m.FraudDetection })));
 
