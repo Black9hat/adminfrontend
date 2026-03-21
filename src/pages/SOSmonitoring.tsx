@@ -388,12 +388,6 @@ function AlertCard({ alert, selected, onClick }: { alert: any; selected: boolean
               padding: '2px 6px', borderRadius: 4,
             }}>🚔 POLICE</span>
           )}
-          {alert.sosType === 'MANUAL' && (
-            <span style={{
-              background: '#1e1060', color: '#a78bfa', fontSize: 9, fontWeight: 800,
-              padding: '2px 6px', borderRadius: 4, letterSpacing: '.05em',
-            }}>⚡ MANUAL SOS</span>
-          )}
         </div>
         <span style={{ color: T.t3, fontSize: 10, fontFamily: 'monospace' }}>{timeAgo(alert.createdAt)}</span>
       </div>
@@ -808,35 +802,12 @@ export default function SOSMonitoring() {
             }}>
               {/* Panel header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span style={{ fontWeight: 800, fontSize: 12, color: T.t1 }}>
-                    🚨 Alert &nbsp;
-                    <span style={{ fontFamily: 'monospace', color: T.t3, fontWeight: 400, fontSize: 11 }}>
-                      …{selected._id?.slice(-10)}
-                    </span>
+                <span style={{ fontWeight: 800, fontSize: 12, color: T.t1 }}>
+                  🚨 Alert &nbsp;
+                  <span style={{ fontFamily: 'monospace', color: T.t3, fontWeight: 400, fontSize: 11 }}>
+                    …{selected._id?.slice(-10)}
                   </span>
-                  {selected.sosType === 'MANUAL' && (
-                    <div style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 8,
-                      background: '#150d3a', border: '1px solid #6d28d9',
-                      borderRadius: 8, padding: '6px 12px', flexWrap: 'wrap',
-                    }}>
-                      <span style={{
-                        background: '#1e1060', color: '#a78bfa', fontSize: 10, fontWeight: 800,
-                        padding: '2px 8px', borderRadius: 4, letterSpacing: '.05em', flexShrink: 0,
-                      }}>⚡ MANUAL SOS TRIGGER</span>
-                      {selected.emergencyContact && (
-                        <span style={{ color: '#c4b5fd', fontSize: 11, fontFamily: 'monospace' }}>
-                          Emergency contact saved by customer:&nbsp;
-                          <a href={'tel:' + selected.emergencyContact}
-                            style={{ color: '#a78bfa', fontWeight: 700, textDecoration: 'underline' }}>
-                            {selected.emergencyContact}
-                          </a>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                </span>
                 <button
                   onClick={() => setSelected(null)}
                   style={{ all: 'unset' as any, cursor: 'pointer', color: T.t3, fontSize: 18, lineHeight: 1 }}
@@ -886,15 +857,9 @@ export default function SOSMonitoring() {
                 <span style={{ background: T.bg0, color: T.t3, fontSize: 10, fontFamily: 'monospace', padding: '3px 9px', borderRadius: 4 }}>
                   {new Date(selected.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                 </span>
-                {selected.sosType === 'MANUAL' ? (
-                  <span style={{ background: '#1e1060', color: '#a78bfa', fontSize: 10, fontFamily: 'monospace', fontWeight: 800, padding: '3px 9px', borderRadius: 4 }}>
-                    ⚡ MANUAL SOS
-                  </span>
-                ) : (
-                  <span style={{ background: T.bg0, color: T.t3, fontSize: 10, fontFamily: 'monospace', padding: '3px 9px', borderRadius: 4 }}>
-                    {selected.sosType ?? 'TRIPLE_TAP'}
-                  </span>
-                )}
+                <span style={{ background: T.bg0, color: T.t3, fontSize: 10, fontFamily: 'monospace', padding: '3px 9px', borderRadius: 4 }}>
+                  {selected.sosType ?? 'TRIPLE_TAP'}
+                </span>
               </div>
 
               {/* Action buttons */}
@@ -991,35 +956,6 @@ export default function SOSMonitoring() {
 
             {/* Meta */}
             <div style={{ marginBottom: 14 }}>
-              {selected.sosType === 'MANUAL' && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                  background: '#150d3a', border: '1px solid #6d28d9',
-                  borderRadius: 8, padding: '8px 12px', marginBottom: 10,
-                }}>
-                  <span style={{
-                    background: '#1e1060', color: '#a78bfa', fontSize: 10, fontWeight: 800,
-                    padding: '2px 8px', borderRadius: 4, letterSpacing: '.05em',
-                  }}>⚡ MANUAL SOS TRIGGER</span>
-                  <span style={{ color: '#c4b5fd', fontSize: 11 }}>
-                    Triggered from SOS page (not during a ride)
-                  </span>
-                  {selected.emergencyContact && (
-                    <div style={{ width: '100%', marginTop: 4 }}>
-                      <InfoRow
-                        label="Emergency Contact"
-                        value={
-                          <a href={'tel:' + selected.emergencyContact}
-                            style={{ color: '#a78bfa', fontWeight: 700, textDecoration: 'underline', fontFamily: 'monospace' }}>
-                            {selected.emergencyContact}
-                          </a>
-                        }
-                        color="#a78bfa"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
               <InfoRow label="Trip ID"   value={'…' + (selected.tripId ?? '—').slice(-12).toUpperCase()} />
               <InfoRow label="SOS Type"  value={selected.sosType ?? 'TRIPLE_TAP'} />
               <InfoRow label="Triggered" value={new Date(selected.createdAt).toLocaleString('en-IN')} />
