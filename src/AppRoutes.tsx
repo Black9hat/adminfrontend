@@ -39,6 +39,7 @@ const CustomersPage          = lazy(() => import("./pages/Customer"));
 const AdminPromotions        = lazy(() => import("./pages/AdminPromotions"));
 const IncentivesManagement   = lazy(() => import("./pages/IncentivesManagement"));
 const PlanManagement         = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
+const CommissionSettings     = lazy(() => import("./pages/CommissionSettings")); // ✅ NEW
 const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage       = lazy(() => import("./pages/Notifications"));
 const HelpManagement         = lazy(() => import("./pages/Helpmanagement"));
@@ -91,6 +92,7 @@ export default function AppRoutes() {
           <Route path="/promotions"         element={<AdminPromotions />} />
           <Route path="/incentives"         element={<IncentivesManagement />} />
           <Route path="/plans"              element={<PlanManagement />} />
+          <Route path="/commission"         element={<CommissionSettings />} />
           <Route path="/coupons"            element={<CouponsManagement />} />
 
           {/* Safety & Trust */}
