@@ -8,7 +8,9 @@ export interface CreatePlanDto {
   durationDays: number;
   commissionRate: number;
   noCommission: boolean;
-  bonusMultiplier: number;
+  perRideIncentive: number;
+  platformFeeFlat: number;
+  platformFeePercent: number;
   benefits: string[];
   monthlyFee: number;
   isTimeBasedPlan: boolean;
@@ -18,7 +20,6 @@ export interface CreatePlanDto {
   planExpiryDate: string | null;
   isActive: boolean;
 }
-
 export interface RevenueStats {
   totalRevenue: number;
   totalPurchases: number;
