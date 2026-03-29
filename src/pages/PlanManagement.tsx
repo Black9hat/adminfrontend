@@ -11,8 +11,10 @@ interface Plan {
   planPrice: number;
   durationDays: number;
   commissionRate: number;
-  bonusMultiplier: number;
   noCommission: boolean;
+  perRideIncentive: number;
+  platformFeeFlat: number;
+  platformFeePercent: number;
   isTimeBasedPlan: boolean;
   planStartTime?: string;
   planEndTime?: string;
@@ -41,8 +43,10 @@ const EMPTY_FORM: CreatePlanDto = {
   planPrice: 0,
   durationDays: 30,
   commissionRate: 10,
-  bonusMultiplier: 1.0,
   noCommission: false,
+  perRideIncentive: 0,
+  platformFeeFlat: 0,
+  platformFeePercent: 0,
   monthlyFee: 0,
   isTimeBasedPlan: false,
   planStartTime: '',
@@ -163,7 +167,8 @@ const PlanManagement: React.FC = () => {
     if (form.durationDays < 1) errs.durationDays = 'Duration must be ≥ 1 day';
     if (!form.noCommission && (form.commissionRate < 0 || form.commissionRate > 100))
       errs.commissionRate = 'Commission must be 0–100';
-    if (form.bonusMultiplier < 1.0) errs.bonusMultiplier = 'Bonus multiplier must be ≥ 1.0';
+    if (form.perRideIncentive < 0) errs.perRideIncentive = 'Incentive must be ≥ 0';
+    if (form.platformFeeFlat < 0) errs.platformFeeFlat = 'Platform fee must be ≥ 0';
     if (form.planActivationDate && form.planExpiryDate && form.planActivationDate > form.planExpiryDate)
       errs.planExpiryDate = 'Expiry must be after activation date';
     setFormErrors(errs);
@@ -189,8 +194,10 @@ const PlanManagement: React.FC = () => {
       planPrice: plan.planPrice,
       durationDays: plan.durationDays,
       commissionRate: plan.commissionRate,
-      bonusMultiplier: plan.bonusMultiplier,
       noCommission: plan.noCommission,
+      perRideIncentive: plan.perRideIncentive ?? 0,
+      platformFeeFlat: plan.platformFeeFlat ?? 0,
+      platformFeePercent: plan.platformFeePercent ?? 0,
       monthlyFee: 0,
       isTimeBasedPlan: plan.isTimeBasedPlan,
       planStartTime: plan.planStartTime || '',
@@ -214,7 +221,9 @@ const PlanManagement: React.FC = () => {
         planPrice: Number(form.planPrice) || 0,
         durationDays: Number(form.durationDays) || 30,
         commissionRate: form.noCommission ? 0 : (Number(form.commissionRate) || 0),
-        bonusMultiplier: Number(form.bonusMultiplier) || 1.0,
+        perRideIncentive: Number(form.perRideIncentive) || 0,
+        platformFeeFlat: Number(form.platformFeeFlat) || 0,
+        platformFeePercent: Number(form.platformFeePercent) || 0,
         planActivationDate: form.planActivationDate || null,
         planExpiryDate: form.planExpiryDate || null,
         planStartTime: form.isTimeBasedPlan ? form.planStartTime : '',
@@ -410,7 +419,8 @@ const PlanManagement: React.FC = () => {
                 <th>Price</th>
                 <th>Duration</th>
                 <th>Commission</th>
-                <th>Bonus</th>
+                <th>Incentive</th>
+                <th>Platform Fee</th>
                 <th>Purchases</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -419,7 +429,7 @@ const PlanManagement: React.FC = () => {
             <tbody>
               {filteredPlans.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', color: '#9898b8', padding: 32 }}>
+                  <td colSpan={10} style={{ textAlign: 'center', color: '#9898b8', padding: 32 }}>
                     No plans found. Create one to get started.
                   </td>
                 </tr>
@@ -439,7 +449,11 @@ const PlanManagement: React.FC = () => {
                   <td style={{ color: '#a78bfa', fontWeight: 600 }}>{fmt(plan.planPrice)}</td>
                   <td>{plan.durationDays}d</td>
                   <td>{plan.noCommission ? <span style={{ color: '#10b981', fontWeight: 600 }}>0%</span> : `${plan.commissionRate}%`}</td>
-                  <td>{plan.bonusMultiplier}x</td>
+                  <td>{plan.perRideIncentive > 0 ? <span style={{ color: '#10b981' }}>₹{plan.perRideIncentive}</span> : <span style={{ color: '#9898b8' }}>—</span>}</td>
+                  <td>{(plan.platformFeeFlat > 0 || plan.platformFeePercent > 0)
+                    ? <span style={{ color: '#f59e0b' }}>{plan.platformFeeFlat > 0 ? `₹${plan.platformFeeFlat}` : `${plan.platformFeePercent}%`}</span>
+                    : <span style={{ color: '#9898b8' }}>—</span>}
+                  </td>
                   <td>{plan.totalPurchases}</td>
                   <td>
                     <label className="pm-toggle">
@@ -538,11 +552,33 @@ const PlanManagement: React.FC = () => {
                   {formErrors.commissionRate && <div className="pm-error-text">{formErrors.commissionRate}</div>}
                 </div>
                 <div>
-                  <label className="pm-label">Bonus Multiplier</label>
-                  <input type="number" min={1} step={0.1} className={`pm-input${formErrors.bonusMultiplier ? ' error' : ''}`}
-                    value={form.bonusMultiplier}
-                    onChange={(e) => setForm((f) => ({ ...f, bonusMultiplier: parseFloat(e.target.value) || 1.0 }))} />
-                  {formErrors.bonusMultiplier && <div className="pm-error-text">{formErrors.bonusMultiplier}</div>}
+                  <label className="pm-label">Per-Ride Incentive (₹)</label>
+                  <input type="number" min={0} step={0.5}
+                    className={`pm-input${formErrors.perRideIncentive ? ' error' : ''}`}
+                    value={form.perRideIncentive}
+                    onChange={(e) => setForm((f) => ({ ...f, perRideIncentive: parseFloat(e.target.value) || 0 }))} />
+                  <div style={{ color: '#9898b8', fontSize: 11, marginTop: 3 }}>Cash credited to driver per completed ride (0 = hidden from driver)</div>
+                  {formErrors.perRideIncentive && <div className="pm-error-text">{formErrors.perRideIncentive}</div>}
+                </div>
+              </div>
+
+              <div className="pm-form-row">
+                <div>
+                  <label className="pm-label">Platform Fee — Flat (₹)</label>
+                  <input type="number" min={0} step={1}
+                    className={`pm-input${formErrors.platformFeeFlat ? ' error' : ''}`}
+                    value={form.platformFeeFlat}
+                    onChange={(e) => setForm((f) => ({ ...f, platformFeeFlat: parseFloat(e.target.value) || 0 }))} />
+                  <div style={{ color: '#9898b8', fontSize: 11, marginTop: 3 }}>Fixed ₹ added to customer fare</div>
+                  {formErrors.platformFeeFlat && <div className="pm-error-text">{formErrors.platformFeeFlat}</div>}
+                </div>
+                <div>
+                  <label className="pm-label">Platform Fee — Percent (%)</label>
+                  <input type="number" min={0} max={100} step={0.5}
+                    className="pm-input"
+                    value={form.platformFeePercent}
+                    onChange={(e) => setForm((f) => ({ ...f, platformFeePercent: parseFloat(e.target.value) || 0 }))} />
+                  <div style={{ color: '#9898b8', fontSize: 11, marginTop: 3 }}>% of fare added to customer bill</div>
                 </div>
               </div>
 

@@ -9,7 +9,6 @@ import {
   Edit2,
   AlertCircle,
   Zap,
-  Coins,
   Trello,
 } from "lucide-react";
 import {
@@ -362,16 +361,6 @@ const CommissionSettings: React.FC = () => {
                   <th
                     style={{
                       padding: "12px",
-                      textAlign: "right",
-                      fontWeight: "bold",
-                      color: COLORS.onSurface,
-                    }}
-                  >
-                    Per-Ride Coins
-                  </th>
-                  <th
-                    style={{
-                      padding: "12px",
                       textAlign: "center",
                       fontWeight: "bold",
                       color: COLORS.onSurface,
@@ -613,45 +602,6 @@ const CommissionSettings: React.FC = () => {
                             <Zap size={14} color={COLORS.success} />
                             <span style={{ fontWeight: "600" }}>
                               ₹{setting.perRideIncentive}
-                            </span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* Per-Ride Coins */}
-                      <td style={{ padding: "12px", textAlign: "right" }}>
-                        {editingId === setting._id ? (
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.perRideCoins || 0}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "perRideCoins",
-                                parseFloat(e.target.value)
-                              )
-                            }
-                            style={{
-                              padding: "6px 8px",
-                              border: `1px solid ${COLORS.divider}`,
-                              borderRadius: "4px",
-                              width: "100%",
-                              textAlign: "right",
-                              fontSize: "0.9rem",
-                            }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "flex-end",
-                              gap: "6px",
-                            }}
-                          >
-                            <Coins size={14} color={COLORS.primary} />
-                            <span style={{ fontWeight: "600" }}>
-                              {setting.perRideCoins}
                             </span>
                           </div>
                         )}
