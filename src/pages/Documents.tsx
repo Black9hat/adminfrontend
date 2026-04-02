@@ -443,6 +443,8 @@ interface Driver {
   email: string;
   phone?: string;
   vehicleType?: string;
+  seats?: number | null;       // ✅ seat count for car/xl
+  vehicleModel?: string | null; // ✅ e.g. "Swift", "Honda City"
   profilePhotoUrl?: string;
   documents: Document[];
   isFullyVerified?: boolean;
@@ -510,6 +512,29 @@ const SecureImage: React.FC<{
       />
     </div>
   );
+};
+
+// ============================================
+// 🚗 VEHICLE DISPLAY LABEL HELPER
+// Centralised — matches Flutter's CarSeatOption.displayLabel()
+//   "car"  + seats 4  → "Car (4 Seater)"
+//   "car"  + seats 6  → "XL / 6 Seater"
+//   "xl"   (any)      → "XL / 6 Seater"   (backward compat)
+//   anything else     → capitalised vehicleType
+// ============================================
+const getVehicleDisplayLabel = (
+  vehicleType?: string,
+  seats?: number | null
+): string => {
+  const vt = (vehicleType ?? "").toLowerCase().trim();
+  if (vt === "xl") return "XL / 6 Seater";
+  if (vt === "car") {
+    if (seats === 6) return "XL / 6 Seater";
+    if (seats === 4) return "Car (4 Seater)";
+    return "Car";
+  }
+  if (!vehicleType) return "";
+  return vehicleType.charAt(0).toUpperCase() + vehicleType.slice(1);
 };
 
 // ============================================
@@ -645,6 +670,8 @@ const VerifiedDriverCard: React.FC<{ driver: Driver }> = ({ driver }) => {
         return <Bike size={16} />;
       case "auto":
         return <Truck size={16} />;
+      case "xl":
+        return <Truck size={16} />;   // XL = large vehicle
       default:
         return <Car size={16} />;
     }
@@ -688,9 +715,9 @@ const VerifiedDriverCard: React.FC<{ driver: Driver }> = ({ driver }) => {
 
         <div className="mt-4 pt-4 border-t border-emerald-200 flex items-center justify-between">
           {driver.vehicleType && (
-            <span className="inline-flex items-center gap-1.5 text-sm bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full capitalize font-medium">
+            <span className="inline-flex items-center gap-1.5 text-sm bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full font-medium">
               {getVehicleIcon(driver.vehicleType)}
-              {driver.vehicleType}
+              {getVehicleDisplayLabel(driver.vehicleType, driver.seats)}
             </span>
           )}
           {driver.totalDocs !== undefined && (
@@ -784,8 +811,8 @@ const ActionableDriverCard: React.FC<{
           </div>
 
           {driver.vehicleType && (
-            <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full capitalize">
-              {driver.vehicleType}
+            <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-full font-medium">
+              {getVehicleDisplayLabel(driver.vehicleType, driver.seats)}
             </span>
           )}
         </div>
@@ -958,6 +985,8 @@ const DocumentsPage: React.FC = () => {
               email: driver.email || "No email",
               phone: driver.phone || null,
               vehicleType: driver.vehicleType || null,
+              seats: driver.seats ?? null,
+              vehicleModel: driver.vehicleModel || null, // ✅ e.g. "Swift"
               profilePhotoUrl: driver.profilePhotoUrl || null,
               documents: docsWithFixedUrls,
             };
@@ -1708,7 +1737,7 @@ const DocumentsPage: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="text-2xl font-bold">{selectedDriver.name}</h2>
-                  <div className="flex items-center gap-4 mt-1 text-white/80">
+                  <div className="flex items-center flex-wrap gap-3 mt-1 text-white/80">
                     <span className="flex items-center gap-1">
                       <Mail size={14} />
                       {selectedDriver.email}
@@ -1720,6 +1749,87 @@ const DocumentsPage: React.FC = () => {
                       </span>
                     )}
                   </div>
+                  {/* Vehicle model • type badge + admin dropdown for 4-seat cars */}
+                  {(selectedDriver.vehicleModel || selectedDriver.vehicleType) && (
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 text-xs bg-white/20 text-white px-2.5 py-1 rounded-full font-semibold">
+                        <Car size={12} />
+                        {[
+                          selectedDriver.vehicleModel,
+                          getVehicleDisplayLabel(selectedDriver.vehicleType, selectedDriver.seats),
+                        ]
+                          .filter(Boolean)
+                          .join(" • ")}
+                      </span>
+                      {/* Admin can toggle car ↔ premium for 4-seat OR legacy cars with no seat data */}
+                      {(selectedDriver.seats === 4 ||
+                        (selectedDriver.seats == null &&
+                          (selectedDriver.vehicleType === "car" ||
+                           selectedDriver.vehicleType === "premium"))) && (
+                        <select
+                          className="text-xs bg-white/20 text-white border border-white/40 rounded-full px-3 py-1 font-semibold cursor-pointer focus:outline-none hover:bg-white/30 transition-colors"
+                          value={selectedDriver.vehicleType || "car"}
+                          title="Set vehicle category for this 4-seater"
+                          onChange={async (e) => {
+                            const newType = e.target.value;
+                            try {
+                              const authToken = getAuthToken();
+                              // ✅ Use axiosInstance (correct baseURL) not raw fetch
+                              await axiosInstance.put(
+                                `/admin/driver/vehicle-type/${selectedDriver._id}`,
+                                { vehicleType: newType },
+                                { headers: getApiHeaders(authToken) }
+                              );
+                              // Optimistically update modal + ALL driver lists
+                              setSelectedDriver((prev) =>
+                                prev ? { ...prev, vehicleType: newType } : prev
+                              );
+                              setPendingDrivers((prev) =>
+                                prev.map((d) =>
+                                  d._id === selectedDriver._id
+                                    ? { ...d, vehicleType: newType }
+                                    : d
+                                )
+                              );
+                              setRejectedDrivers((prev) =>
+                                prev.map((d) =>
+                                  d._id === selectedDriver._id
+                                    ? { ...d, vehicleType: newType }
+                                    : d
+                                )
+                              );
+                              setVerifiedDrivers((prev) =>
+                                prev.map((d) =>
+                                  d._id === selectedDriver._id
+                                    ? { ...d, vehicleType: newType }
+                                    : d
+                                )
+                              );
+                            } catch (err: any) {
+                              console.error("Failed to update vehicle type", err);
+                              alert(
+                                err?.response?.data?.message ||
+                                "Failed to update vehicle type. Please try again."
+                              );
+                            }
+                          }}
+                        >
+                          <option value="car" className="text-black bg-white">
+                            🚗 Car
+                          </option>
+                          <option value="premium" className="text-black bg-white">
+                            ⭐ Premium
+                          </option>
+                        </select>
+                      )}
+                      {/* 6-seat XL badge — no admin override */}
+                      {(selectedDriver.seats === 6 || selectedDriver.vehicleType === "xl") && (
+                        <span className="text-xs bg-white/10 text-white/70 border border-white/20 rounded-full px-2.5 py-1 font-medium">
+                          XL auto-classified
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <button
