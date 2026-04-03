@@ -60,7 +60,8 @@ export default function DriverManagement() {
     setDL(true);
     try {
       const r = await axiosInstance.get("/admin/documents/" + driverId, { headers: hdrs });
-      setDocs(r.data.documents ?? []);
+      // ✅ FIX 1: adminController.getDriverDocuments returns { docs: [...] } not { documents: [...] }
+      setDocs(r.data.docs ?? r.data.documents ?? []);
     } catch { setDocs([]); }
     finally { setDL(false); }
   };
@@ -220,18 +221,26 @@ export default function DriverManagement() {
             <div key={doc._id} style={{ borderBottom: "1px solid " + C.border, paddingBottom: "1rem", marginBottom: "1rem" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontWeight: 700 }}>{doc.docType ?? doc.type ?? "Document"}</div>
-                <Badge status={doc.isVerified ? "active" : doc.isRejected ? "blocked" : "pending"} label={doc.isVerified ? "Verified" : doc.isRejected ? "Rejected" : "Pending"} />
+                {/* ✅ FIX 2: DriverDoc uses doc.status — not isVerified/isRejected boolean fields */}
+                <Badge
+                  status={doc.status === "approved" || doc.status === "verified" ? "active" : doc.status === "rejected" ? "blocked" : "pending"}
+                  label={doc.status === "approved" || doc.status === "verified" ? "Verified" : doc.status === "rejected" ? "Rejected" : "Pending"}
+                />
               </div>
               {doc.imageUrl && <img src={doc.imageUrl} alt={doc.docType} style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />}
-              <InfoRow label="Doc Number" value={doc.docNumber ?? "—"} />
+              <InfoRow label="Doc Number" value={doc.extractedData?.licenseNumber ?? doc.docNumber ?? "—"} />
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <Btn size="sm" variant="success" icon={<CheckCircle size={11}/>} onClick={async () => {
-                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { isVerified: true });
+                  // ✅ FIX 3: verifyDriverDocument expects { status: "approved" } — not { isVerified: true }
+                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { status: "approved" });
                   if (ok) { toast.success("Document approved"); loadDocs(sel._id); }
+                  else toast.error("Approve failed");
                 }}>Approve</Btn>
                 <Btn size="sm" variant="danger" icon={<XCircle size={11}/>} onClick={async () => {
-                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { isVerified: false, isRejected: true });
+                  // ✅ FIX 3: verifyDriverDocument expects { status: "rejected" } — not { isVerified: false, isRejected: true }
+                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { status: "rejected", remarks: "Rejected by admin" });
                   if (ok) { toast.success("Document rejected"); loadDocs(sel._id); }
+                  else toast.error("Reject failed");
                 }}>Reject</Btn>
               </div>
             </div>
