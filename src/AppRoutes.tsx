@@ -36,9 +36,10 @@ const DriverEarnings         = lazy(() => import("./pages/Driverearningsmanageme
 const DriverWalletManagement = lazy(() => import("./pages/Driverwalletmanagement"));
 const ServiceAreas           = lazy(() => import("./pages/Serviceareamanagement"));
 const CustomersPage          = lazy(() => import("./pages/Customer"));
-const AdminPromotions        = lazy(() => import("./pages/AdminPromotions"));
-const IncentivesManagement   = lazy(() => import("./pages/IncentivesManagement"));
-const PlanManagement         = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
+const AdminPromotions               = lazy(() => import("./pages/AdminPromotions"));
+const IncentivesManagement         = lazy(() => import("./pages/IncentivesManagement"));
+const TimingSlotIncentivesManagement = lazy(() => import("./pages/TimingSlotIncentivesManagement")); // ✅ NEW
+const PlanManagement               = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
 const CommissionSettings     = lazy(() => import("./pages/CommissionSettings")); // ✅ NEW
 const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage       = lazy(() => import("./pages/Notifications"));
@@ -89,9 +90,10 @@ export default function AppRoutes() {
           <Route path="/payments"           element={<PaymentRefund />} />
           <Route path="/fare-management"    element={<FareManagement />} />
           <Route path="/fare-pricing"       element={<FarePricing />} />
-          <Route path="/promotions"         element={<AdminPromotions />} />
-          <Route path="/incentives"         element={<IncentivesManagement />} />
-          <Route path="/plans"              element={<PlanManagement />} />
+          <Route path="/promotions"              element={<AdminPromotions />} />
+          <Route path="/incentives"              element={<IncentivesManagement />} />
+          <Route path="/incentives-timing"      element={<TimingSlotIncentivesManagement />} />
+          <Route path="/plans"                   element={<PlanManagement />} />
           <Route path="/commission"         element={<CommissionSettings />} />
           <Route path="/coupons"            element={<CouponsManagement />} />
 
