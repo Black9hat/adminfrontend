@@ -64,6 +64,7 @@ const GROUPS: NavGroup[] = [
       { path: "/incentives-timing", label: "Timing Incentives", icon: <Clock size={14} />     },
       { path: "/plans",           label: "Driver Plans",       icon: <Gem size={14} />        },
       { path: "/commission",      label: "Commission Settings",icon: <DollarSign size={14} /> },
+      { path: "/referrals",       label: "Referrals",          icon: <Gift size={14} />       },
       { path: "/coupons",         label: "Coupons",            icon: <Ticket size={14} />     },
     ],
   },
