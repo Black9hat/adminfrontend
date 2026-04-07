@@ -347,21 +347,37 @@ const TimingSlotIncentivesManagement = () => {
               ))}
             </div>
 
-            {/* Active Status */}
-            <div className="bg-white rounded-lg shadow p-6 mb-6">
-              <label className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={incentive.isActive}
-                  onChange={(e) =>
-                    setIncentive({ ...incentive, isActive: e.target.checked })
-                  }
-                  className="w-4 h-4 rounded border-gray-300"
-                />
-                <span className="text-sm font-medium text-gray-700">
-                  Active / Visible to Drivers
-                </span>
-              </label>
+            {/* Active Status Toggle */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow p-6 mb-6 border-2 border-blue-200">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <h3 className="text-lg font-bold text-gray-900 mb-2">
+                    Incentive Status
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    {incentive.isActive 
+                      ? '✅ Active - Drivers can see and earn these incentives'
+                      : '❌ Inactive - Drivers will see "No Incentives Today" message'
+                    }
+                  </p>
+                </div>
+                
+                {/* Toggle Switch */}
+                <label className="relative inline-flex items-center cursor-pointer ml-4">
+                  <input
+                    type="checkbox"
+                    checked={incentive.isActive}
+                    onChange={(e) =>
+                      setIncentive({ ...incentive, isActive: e.target.checked })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-14 h-8 bg-gray-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-7 after:w-7 after:transition-all peer-checked:bg-blue-600"></div>
+                  <span className="ml-3 text-sm font-medium text-gray-700">
+                    {incentive.isActive ? 'ON' : 'OFF'}
+                  </span>
+                </label>
+              </div>
             </div>
 
             {/* Save Button */}
