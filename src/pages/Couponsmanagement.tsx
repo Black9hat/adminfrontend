@@ -72,6 +72,14 @@ interface AppSettings {
     rewardCouponAmount: number;
     rewardCoins: number;
   };
+  driverReferral?: {
+    enabled: boolean;
+    baseReferralsRequired: number;
+    extraReferralsPerCycle: number;
+    maxReferralCycles: number;
+    baseRewardAmount: number;
+    extraRewardAmount: number;
+  };
 }
 
 interface ReferralStats {
@@ -814,6 +822,28 @@ const RewardConfigTab: React.FC<{
     setSettings({ ...settings, [section]: { ...settings[section], [key]: value } });
   };
 
+  const getDriverReferral = () => {
+    return {
+      enabled: settings.driverReferral?.enabled ?? false,
+      baseReferralsRequired: settings.driverReferral?.baseReferralsRequired ?? 5,
+      extraReferralsPerCycle: settings.driverReferral?.extraReferralsPerCycle ?? 2,
+      maxReferralCycles: settings.driverReferral?.maxReferralCycles ?? 3,
+      baseRewardAmount: settings.driverReferral?.baseRewardAmount ?? 100,
+      extraRewardAmount: settings.driverReferral?.extraRewardAmount ?? 25,
+    };
+  };
+
+  const updateDriverReferral = (key: string, value: any) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      driverReferral: {
+        ...getDriverReferral(),
+        [key]: value,
+      },
+    });
+  };
+
   if (loading) return (
     <div className="text-center py-16">
       <svg className="animate-spin h-8 w-8 mx-auto text-orange-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
@@ -1071,6 +1101,78 @@ const RewardConfigTab: React.FC<{
           </div>
         </SectionCard>
       </div>
+
+      {/* Driver Referral — under the same Reward Config flow */}
+      <SectionCard
+        icon="🚕"
+        title="Driver Referral System"
+        subtitle="Separate rewards for driver-to-driver referrals (affects driver app)"
+      >
+        <Toggle
+          checked={getDriverReferral().enabled}
+          onChange={(v) => updateDriverReferral('enabled', v)}
+          label="Enable driver referral rewards"
+        />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Base Referrals Required (Cycle 1)">
+            <NumInput
+              value={getDriverReferral().baseReferralsRequired}
+              onChange={(v) => updateDriverReferral('baseReferralsRequired', v)}
+              min={1}
+            />
+          </Field>
+          <Field label="Extra Referrals per Cycle">
+            <NumInput
+              value={getDriverReferral().extraReferralsPerCycle}
+              onChange={(v) => updateDriverReferral('extraReferralsPerCycle', v)}
+              min={0}
+            />
+          </Field>
+          <Field label="Max Reward Cycles">
+            <NumInput
+              value={getDriverReferral().maxReferralCycles}
+              onChange={(v) => updateDriverReferral('maxReferralCycles', v)}
+              min={1}
+              max={10}
+            />
+          </Field>
+          <Field label="Base Wallet Reward ₹ (Cycle 1)">
+            <NumInput
+              value={getDriverReferral().baseRewardAmount}
+              onChange={(v) => updateDriverReferral('baseRewardAmount', v)}
+              min={0}
+            />
+          </Field>
+          <Field label="Extra Wallet Reward per Cycle ₹">
+            <NumInput
+              value={getDriverReferral().extraRewardAmount}
+              onChange={(v) => updateDriverReferral('extraRewardAmount', v)}
+              min={0}
+            />
+          </Field>
+        </div>
+
+        <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 space-y-1">
+          <div className="font-bold text-sm mb-2">📊 Driver Cycle Preview</div>
+          {Array.from({ length: getDriverReferral().maxReferralCycles }, (_, i) => {
+            const required =
+              getDriverReferral().baseReferralsRequired +
+              i * getDriverReferral().extraReferralsPerCycle;
+            const reward =
+              getDriverReferral().baseRewardAmount +
+              i * getDriverReferral().extraRewardAmount;
+            return (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <span className="w-16 font-semibold">Cycle {i + 1}:</span>
+                <span>{required} referrals</span>
+                <span className="text-gray-400">→</span>
+                <span className="font-bold text-green-700">₹{reward} wallet reward</span>
+              </div>
+            );
+          })}
+        </div>
+      </SectionCard>
 
       {/* ═══════════════════════════════════════════════════════════════════
           🪙 COINS SYSTEM — Full-width panel, all fields clearly grouped

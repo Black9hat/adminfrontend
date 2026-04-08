@@ -41,7 +41,6 @@ const IncentivesManagement         = lazy(() => import("./pages/IncentivesManage
 const TimingSlotIncentivesManagement = lazy(() => import("./pages/TimingSlotIncentivesManagement")); // ✅ NEW
 const PlanManagement               = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
 const CommissionSettings     = lazy(() => import("./pages/CommissionSettings")); // ✅ NEW
-const ReferralManagement     = lazy(() => import("./pages/ReferralManagement"));
 const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
 const NotificationPage       = lazy(() => import("./pages/Notifications"));
 const HelpManagement         = lazy(() => import("./pages/Helpmanagement"));
@@ -96,7 +95,6 @@ export default function AppRoutes() {
           <Route path="/incentives-timing"      element={<TimingSlotIncentivesManagement />} />
           <Route path="/plans"                   element={<PlanManagement />} />
           <Route path="/commission"         element={<CommissionSettings />} />
-          <Route path="/referrals"           element={<ReferralManagement />} />
           <Route path="/coupons"            element={<CouponsManagement />} />
 
           {/* Safety & Trust */}
