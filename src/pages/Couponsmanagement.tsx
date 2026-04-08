@@ -824,12 +824,12 @@ const RewardConfigTab: React.FC<{
 
   const getDriverReferral = () => {
     return {
-      enabled: settings.driverReferral?.enabled ?? false,
-      baseReferralsRequired: settings.driverReferral?.baseReferralsRequired ?? 5,
-      extraReferralsPerCycle: settings.driverReferral?.extraReferralsPerCycle ?? 2,
-      maxReferralCycles: settings.driverReferral?.maxReferralCycles ?? 3,
-      baseRewardAmount: settings.driverReferral?.baseRewardAmount ?? 100,
-      extraRewardAmount: settings.driverReferral?.extraRewardAmount ?? 25,
+      enabled: settings?.driverReferral?.enabled ?? false,
+      baseReferralsRequired: settings?.driverReferral?.baseReferralsRequired ?? 5,
+      extraReferralsPerCycle: settings?.driverReferral?.extraReferralsPerCycle ?? 2,
+      maxReferralCycles: settings?.driverReferral?.maxReferralCycles ?? 3,
+      baseRewardAmount: settings?.driverReferral?.baseRewardAmount ?? 100,
+      extraRewardAmount: settings?.driverReferral?.extraRewardAmount ?? 25,
     };
   };
 
