@@ -74,11 +74,9 @@ interface AppSettings {
   };
   driverReferral?: {
     enabled: boolean;
-    baseReferralsRequired: number;
-    extraReferralsPerCycle: number;
-    maxReferralCycles: number;
-    baseRewardAmount: number;
-    extraRewardAmount: number;
+    referralsRequired: number;
+    ridesToComplete: number;
+    rewardAmount: number;
   };
 }
 
@@ -825,11 +823,15 @@ const RewardConfigTab: React.FC<{
   const getDriverReferral = () => {
     return {
       enabled: settings?.driverReferral?.enabled ?? false,
-      baseReferralsRequired: settings?.driverReferral?.baseReferralsRequired ?? 5,
-      extraReferralsPerCycle: settings?.driverReferral?.extraReferralsPerCycle ?? 2,
-      maxReferralCycles: settings?.driverReferral?.maxReferralCycles ?? 3,
-      baseRewardAmount: settings?.driverReferral?.baseRewardAmount ?? 100,
-      extraRewardAmount: settings?.driverReferral?.extraRewardAmount ?? 25,
+      referralsRequired:
+        settings?.driverReferral?.referralsRequired ??
+        (settings?.driverReferral as any)?.baseReferralsRequired ??
+        1,
+      ridesToComplete: settings?.driverReferral?.ridesToComplete ?? 1,
+      rewardAmount:
+        settings?.driverReferral?.rewardAmount ??
+        (settings?.driverReferral as any)?.baseRewardAmount ??
+        100,
     };
   };
 
@@ -1106,7 +1108,7 @@ const RewardConfigTab: React.FC<{
       <SectionCard
         icon="🚕"
         title="Driver Referral System"
-        subtitle="Separate rewards for driver-to-driver referrals (affects driver app)"
+        subtitle="Simple model: referral target + rides per referred driver + wallet payout"
       >
         <Toggle
           checked={getDriverReferral().enabled}
@@ -1115,62 +1117,38 @@ const RewardConfigTab: React.FC<{
         />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Base Referrals Required (Cycle 1)">
+          <Field label="Referrals Required">
             <NumInput
-              value={getDriverReferral().baseReferralsRequired}
-              onChange={(v) => updateDriverReferral('baseReferralsRequired', v)}
+              value={getDriverReferral().referralsRequired}
+              onChange={(v) => updateDriverReferral('referralsRequired', v)}
               min={1}
             />
           </Field>
-          <Field label="Extra Referrals per Cycle">
+          <Field label="Rides Required per Referred Driver">
             <NumInput
-              value={getDriverReferral().extraReferralsPerCycle}
-              onChange={(v) => updateDriverReferral('extraReferralsPerCycle', v)}
-              min={0}
-            />
-          </Field>
-          <Field label="Max Reward Cycles">
-            <NumInput
-              value={getDriverReferral().maxReferralCycles}
-              onChange={(v) => updateDriverReferral('maxReferralCycles', v)}
+              value={getDriverReferral().ridesToComplete}
+              onChange={(v) => updateDriverReferral('ridesToComplete', v)}
               min={1}
-              max={10}
             />
           </Field>
-          <Field label="Base Wallet Reward ₹ (Cycle 1)">
+          <Field label="Wallet Reward Amount ₹">
             <NumInput
-              value={getDriverReferral().baseRewardAmount}
-              onChange={(v) => updateDriverReferral('baseRewardAmount', v)}
-              min={0}
-            />
-          </Field>
-          <Field label="Extra Wallet Reward per Cycle ₹">
-            <NumInput
-              value={getDriverReferral().extraRewardAmount}
-              onChange={(v) => updateDriverReferral('extraRewardAmount', v)}
+              value={getDriverReferral().rewardAmount}
+              onChange={(v) => updateDriverReferral('rewardAmount', v)}
               min={0}
             />
           </Field>
         </div>
 
         <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 space-y-1">
-          <div className="font-bold text-sm mb-2">📊 Driver Cycle Preview</div>
-          {Array.from({ length: getDriverReferral().maxReferralCycles }, (_, i) => {
-            const required =
-              getDriverReferral().baseReferralsRequired +
-              i * getDriverReferral().extraReferralsPerCycle;
-            const reward =
-              getDriverReferral().baseRewardAmount +
-              i * getDriverReferral().extraRewardAmount;
-            return (
-              <div key={i} className="flex flex-wrap items-center gap-2">
-                <span className="w-16 font-semibold">Cycle {i + 1}:</span>
-                <span>{required} referrals</span>
-                <span className="text-gray-400">→</span>
-                <span className="font-bold text-green-700">₹{reward} wallet reward</span>
-              </div>
-            );
-          })}
+          <div className="font-bold text-sm mb-2">📊 Driver Referral Rule Preview</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold">Refer {getDriverReferral().referralsRequired} driver(s)</span>
+            <span className="text-gray-400">+</span>
+            <span className="font-semibold">each completes {getDriverReferral().ridesToComplete} ride(s)</span>
+            <span className="text-gray-400">→</span>
+            <span className="font-bold text-green-700">₹{getDriverReferral().rewardAmount} to wallet</span>
+          </div>
         </div>
       </SectionCard>
 
