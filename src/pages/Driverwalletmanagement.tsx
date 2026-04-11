@@ -1037,6 +1037,16 @@ function WithdrawalRequestsTab() {
             <div style={{ background: C.surface2, borderRadius: 10, overflow: "hidden", border: "1px solid " + C.border }}>
               <InfoRow label="UPI ID" value={selectedWithdrawal.upiId} />
               <InfoRow label="Driver ID" value={selectedWithdrawal.driverId?.toString()} />
+              {(selectedWithdrawal.clientRequestId || selectedWithdrawal.idempotencyKey) && (
+                <InfoRow
+                  label="Client Request ID"
+                  value={
+                    <span style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                      {selectedWithdrawal.clientRequestId || selectedWithdrawal.idempotencyKey}
+                    </span>
+                  }
+                />
+              )}
               <InfoRow label="Initiated At" value={new Date(selectedWithdrawal.initiatedAt).toLocaleString("en-IN")} />
               {selectedWithdrawal.processedAt && (
                 <InfoRow label="Processed At" value={new Date(selectedWithdrawal.processedAt).toLocaleString("en-IN")} />
