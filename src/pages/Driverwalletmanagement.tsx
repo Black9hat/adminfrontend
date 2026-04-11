@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   RefreshCw, Wallet, TrendingUp, AlertCircle, CheckCircle2,
   Clock, Eye, EyeOff, Download, Filter, ArrowUpRight, ArrowDownLeft,
-  DollarSign, User, Calendar, CreditCard,
+  DollarSign, User, Calendar, CreditCard, Send,
 } from "lucide-react";
 import { useDrivers, useMutation } from "../hooks/index";
 import {
@@ -667,13 +667,289 @@ function AllTransactionsModal({ driver, open, onClose }: { driver: any; open: bo
   );
 }
 
+// ── WithdrawalRequestsTab ────────────────────────────────────────────────────
+function WithdrawalRequestsTab() {
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState<any>(null);
+
+  const fetchWithdrawals = useCallback(async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("adminToken");
+      const res = await fetch(`${API_BASE_URL}/api/withdrawal/admin/all`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.withdrawals)) {
+        setWithdrawals(
+          data.withdrawals.sort((a: any, b: any) => 
+            new Date(b.initiatedAt).getTime() - new Date(a.initiatedAt).getTime()
+          )
+        );
+      }
+    } catch (err) {
+      console.error("❌ Failed to fetch withdrawals:", err);
+      toast.error("Failed to load withdrawal requests");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchWithdrawals();
+  }, [fetchWithdrawals]);
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case "completed": return C.green;
+      case "processing": return C.amber;
+      case "failed": return C.red;
+      case "pending": return C.cyan;
+      default: return C.muted;
+    }
+  };
+
+  const statusIcon = (status: string) => {
+    switch (status) {
+      case "completed": return <CheckCircle2 size={14} />;
+      case "processing": return <Clock size={14} />;
+      case "failed": return <AlertCircle size={14} />;
+      case "pending": return <Clock size={14} />;
+      default: return <Clock size={14} />;
+    }
+  };
+
+  const filtered = withdrawals
+    .filter(w => filter === "all" || w.status === filter)
+    .filter(w => {
+      if (!search) return true;
+      const s = search.toLowerCase();
+      return w.upiId?.toLowerCase().includes(s) ||
+             w.driverId?.toString().includes(s) ||
+             w.razorpayPayoutId?.includes(s);
+    });
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+      {/* Stats */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: "1rem",
+      }}>
+        {[
+          { label: "Total Requests", value: withdrawals.length, color: C.primary },
+          { label: "Completed", value: withdrawals.filter(w => w.status === "completed").length, color: C.green },
+          { label: "Processing", value: withdrawals.filter(w => w.status === "processing").length, color: C.amber },
+          { label: "Failed", value: withdrawals.filter(w => w.status === "failed").length, color: C.red },
+        ].map((stat, i) => (
+          <div key={i} style={{
+            background: stat.color + "15",
+            border: "1px solid " + stat.color + "30",
+            borderRadius: 10, padding: "1rem",
+          }}>
+            <div style={{ fontSize: "0.7rem", color: C.muted, textTransform: "uppercase", fontWeight: 600, marginBottom: 4 }}>
+              {stat.label}
+            </div>
+            <div style={{ fontSize: "1.8rem", fontWeight: 800, color: stat.color }}>
+              {stat.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}>
+          {["all", "pending", "processing", "completed", "failed"].map(s => (
+            <button key={s} onClick={() => setFilter(s)} style={{
+              padding: "6px 14px", borderRadius: 20, border: "1.5px solid",
+              cursor: "pointer", fontSize: "0.78rem", fontWeight: 600,
+              borderColor: filter === s ? statusColor(s) : C.border,
+              background: filter === s ? statusColor(s) + "18" : "transparent",
+              color: filter === s ? statusColor(s) : C.muted,
+              textTransform: "capitalize",
+            }}>
+              {s}
+            </button>
+          ))}
+          <input
+            placeholder="Search UPI, driver ID, payout ID…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              flex: 1, minWidth: 200, padding: "6px 12px", borderRadius: 8,
+              border: "1px solid " + C.border, background: C.surface2,
+              color: "inherit", fontSize: "0.82rem", outline: "none",
+            }}
+          />
+          <Btn size="sm" variant="ghost" icon={<RefreshCw size={13} />} onClick={fetchWithdrawals} loading={loading}>
+            Refresh
+          </Btn>
+        </div>
+      </Card>
+
+      {/* List */}
+      <Card>
+        {loading ? (
+          <div style={{ padding: "3rem", textAlign: "center" }}><Spinner label="Loading withdrawals…" /></div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "3rem", textAlign: "center", color: C.muted }}>
+            <Send size={32} style={{ margin: "0 auto 1rem", opacity: 0.5 }} />
+            <p>No withdrawal requests found</p>
+            <p style={{ fontSize: "0.85rem", marginTop: 4 }}>Adjust filters or check back later</p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            {filtered.map((w: any) => (
+              <div
+                key={w._id}
+                onClick={() => setSelectedWithdrawal(w)}
+                style={{
+                  padding: "1rem", borderRadius: 10,
+                  border: "1px solid " + C.border,
+                  background: C.surface2,
+                  cursor: "pointer", display: "flex",
+                  alignItems: "center", gap: 12,
+                  transition: "all 0.15s",
+                }}
+              >
+                {/* Icon */}
+                <div style={{
+                  width: 40, height: 40, borderRadius: "50%",
+                  background: statusColor(w.status) + "20",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: statusColor(w.status), flexShrink: 0,
+                }}>
+                  {statusIcon(w.status)}
+                </div>
+
+                {/* Info */}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>
+                    ₹{(w.amount || 0).toFixed(2)} → {w.upiId}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4, fontSize: "0.72rem", color: C.muted }}>
+                    <span>Driver: {w.driverId?.toString().slice(-6) || "—"}</span>
+                    <span>·</span>
+                    <span>{new Date(w.initiatedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                    {w.razorpayPayoutId && (
+                      <>
+                        <span>·</span>
+                        <span style={{ fontFamily: "monospace" }}>{w.razorpayPayoutId}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Status badge */}
+                <div style={{
+                  padding: "4px 10px", borderRadius: 6,
+                  background: statusColor(w.status) + "20",
+                  color: statusColor(w.status),
+                  fontSize: "0.7rem", fontWeight: 700,
+                  textTransform: "uppercase",
+                }}>
+                  {w.status}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Withdrawal Detail Modal */}
+      {selectedWithdrawal && (
+        <Modal open={!!selectedWithdrawal} onClose={() => setSelectedWithdrawal(null)} title="Withdrawal Request Details" width={600}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.2rem" }}>
+            {/* Amount header */}
+            <div style={{
+              background: statusColor(selectedWithdrawal.status) + "10",
+              border: "1px solid " + statusColor(selectedWithdrawal.status) + "30",
+              borderRadius: 10, padding: "1.2rem",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div>
+                <div style={{ fontSize: "0.7rem", color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                  Withdrawal Amount
+                </div>
+                <div style={{ fontSize: "2rem", fontWeight: 800, color: statusColor(selectedWithdrawal.status), fontFamily: "monospace" }}>
+                  ₹{(selectedWithdrawal.amount || 0).toFixed(2)}
+                </div>
+              </div>
+              <div style={{
+                padding: "6px 14px", borderRadius: 8,
+                background: statusColor(selectedWithdrawal.status) + "20",
+                color: statusColor(selectedWithdrawal.status),
+                fontSize: "0.75rem", fontWeight: 700,
+                textTransform: "uppercase", textAlign: "center",
+              }}>
+                {selectedWithdrawal.status}
+              </div>
+            </div>
+
+            {/* Details */}
+            <div style={{ background: C.surface2, borderRadius: 10, overflow: "hidden", border: "1px solid " + C.border }}>
+              <InfoRow label="UPI ID" value={selectedWithdrawal.upiId} />
+              <InfoRow label="Driver ID" value={selectedWithdrawal.driverId?.toString()} />
+              <InfoRow label="Initiated At" value={new Date(selectedWithdrawal.initiatedAt).toLocaleString("en-IN")} />
+              {selectedWithdrawal.processedAt && (
+                <InfoRow label="Processed At" value={new Date(selectedWithdrawal.processedAt).toLocaleString("en-IN")} />
+              )}
+              {selectedWithdrawal.razorpayPayoutId && (
+                <InfoRow label="Razorpay Payout ID" value={selectedWithdrawal.razorpayPayoutId} style={{ fontFamily: "monospace", fontSize: "0.8rem" }} />
+              )}
+              {selectedWithdrawal.failureReason && (
+                <InfoRow label="Failure Reason" value={selectedWithdrawal.failureReason} />
+              )}
+              <InfoRow label="Balance Debited" value={selectedWithdrawal.balanceDebited ? "Yes" : "No"} />
+            </div>
+
+            {/* Webhook events */}
+            {selectedWithdrawal.webhookEvents && selectedWithdrawal.webhookEvents.length > 0 && (
+              <div>
+                <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Webhook Events
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                  {selectedWithdrawal.webhookEvents.map((evt: any, i: number) => (
+                    <div key={i} style={{
+                      padding: "0.6rem 0.8rem", borderRadius: 6,
+                      background: C.surface2, border: "1px solid " + C.border,
+                      fontSize: "0.75rem",
+                    }}>
+                      <div style={{ fontWeight: 600 }}>
+                        {evt.event}
+                      </div>
+                      <div style={{ color: C.muted, fontSize: "0.7rem", marginTop: 2 }}>
+                        {new Date(evt.receivedAt).toLocaleString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 export default function DriverWalletManagement() {
   const { drivers, loading, error, refetch } = useDrivers();
   const { mutate, loading: acting } = useMutation();
 
+  const [tab, setTab] = useState<"wallets" | "withdrawals">("wallets");
   const [statusF, setStatusF] = useState("all");
   const [q, setQ] = useState("");
-  const [page, setPage] = useState(1);
+  const [page,   setPage] = useState(1);
   const [selectedDriver, setSelectedDriver] = useState<any>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [showTxnModal, setShowTxnModal] = useState(false);
@@ -912,7 +1188,7 @@ export default function DriverWalletManagement() {
               💰 Driver Wallet Management
             </h1>
             <p style={{ fontSize: "0.9rem", color: C.muted, margin: "0.5rem 0 0" }}>
-              Monitor driver earnings, transactions, and wallet balance
+              Monitor driver earnings, transactions, and withdrawal requests
             </p>
           </div>
           <Btn
@@ -922,6 +1198,25 @@ export default function DriverWalletManagement() {
           >
             Refresh
           </Btn>
+        </div>
+
+        {/* Tab buttons */}
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          {[
+            { value: "wallets" as const, label: "📊 Wallets", icon: Wallet },
+            { value: "withdrawals" as const, label: "💸 Withdrawals", icon: Send },
+          ].map(t => (
+            <button key={t.value} onClick={() => { setTab(t.value); setPage(1); }} style={{
+              padding: "8px 16px", borderRadius: 8, border: "1px solid",
+              cursor: "pointer", fontSize: "0.85rem", fontWeight: 600,
+              borderColor: tab === t.value ? C.primary : C.border,
+              background: tab === t.value ? C.primary + "15" : "transparent",
+              color: tab === t.value ? C.primary : C.muted,
+              display: "flex", alignItems: "center", gap: 6,
+            }}>
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -965,102 +1260,112 @@ export default function DriverWalletManagement() {
         </div>
       )}
 
-      {/* Stats */}
-      {!loading && <WalletStatsSection stats={stats} />}
+      {/* WALLETS TAB */}
+      {tab === "wallets" && (
+        <>
+          {/* Stats */}
+          {!loading && <WalletStatsSection stats={stats} />}
 
-      {/* Filters */}
-      <Card style={{ marginBottom: "1.5rem" }}>
-        <div style={{
-          display: "grid", gridTemplateColumns: "1fr 200px 1fr",
-          gap: "1rem", alignItems: "flex-end",
-        }}>
-          <SearchBar
-            placeholder="Search driver name, phone, or ID…"
-            value={q}
-            onChange={setQ}
-          />
-          <Sel
-            label="Status"
-            value={statusF}
-            onChange={setStatusF}
-            options={STATUS_TABS}
-          />
-          <div style={{ textAlign: "right", fontSize: "0.85rem", color: C.muted }}>
-            <span style={{ fontWeight: 600 }}>{filtered.length}</span> drivers
-            {Object.keys(walletData).length > 0 && (
-              <span>
-                {" "}· <span style={{ color: C.green }}>{Object.keys(walletData).length}</span> wallets
-              </span>
-            )}
-          </div>
-        </div>
-      </Card>
-
-      {/* Loading */}
-      {(loading || walletLoading) && <Spinner label="Loading wallets…" />}
-
-      {/* Driver Cards (Change 4: onExport passed to DriverWalletCard) */}
-      {!loading && !walletLoading && paged.length > 0 ? (
-        <div>
-          {paged.map((driver: any) => {
-            const driverIdStr = (driver._id || "").toString();
-            const wallet = walletData[driverIdStr] || {
-              availableBalance: 0,
-              totalEarnings: 0,
-              totalCommission: 0,
-              pendingAmount: 0,
-              transactions: [],
-            };
-
-            return (
-              <DriverWalletCard
-                key={driver._id}
-                driver={driver}
-                wallet={wallet}
-                onViewTransactions={() => handleViewTransactions(driver)}
-                onExport={() => exportDriverCSV(driver, wallet)}
+          {/* Filters */}
+          <Card style={{ marginBottom: "1.5rem" }}>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 200px 1fr",
+              gap: "1rem", alignItems: "flex-end",
+            }}>
+              <SearchBar
+                placeholder="Search driver name, phone, or ID…"
+                value={q}
+                onChange={setQ}
               />
-            );
-          })}
-          <Pagination
-            page={page}
-            pages={pages}
-            total={filtered.length}
-            perPage={PER}
-            onChange={setPage}
-          />
-        </div>
-      ) : (
-        !loading && !walletLoading && (
-          <Card style={{ padding: "2rem", textAlign: "center" }}>
-            <Wallet size={48} style={{ color: C.muted, margin: "0 auto 1rem" }} />
-            <p style={{ color: C.muted, fontSize: "1rem" }}>No drivers found</p>
-            <p style={{ color: C.muted, fontSize: "0.8rem", marginTop: 4 }}>
-              {q ? "Try adjusting your search" : "No drivers registered yet"}
-            </p>
+              <Sel
+                label="Status"
+                value={statusF}
+                onChange={setStatusF}
+                options={STATUS_TABS}
+              />
+              <div style={{ textAlign: "right", fontSize: "0.85rem", color: C.muted }}>
+                <span style={{ fontWeight: 600 }}>{filtered.length}</span> drivers
+                {Object.keys(walletData).length > 0 && (
+                  <span>
+                    {" "}· <span style={{ color: C.green }}>{Object.keys(walletData).length}</span> wallets
+                  </span>
+                )}
+              </div>
+            </div>
           </Card>
-        )
+
+          {/* Loading */}
+          {(loading || walletLoading) && <Spinner label="Loading wallets…" />}
+
+          {/* Driver Cards (Change 4: onExport passed to DriverWalletCard) */}
+          {!loading && !walletLoading && paged.length > 0 ? (
+            <div>
+              {paged.map((driver: any) => {
+                const driverIdStr = (driver._id || "").toString();
+                const wallet = walletData[driverIdStr] || {
+                  availableBalance: 0,
+                  totalEarnings: 0,
+                  totalCommission: 0,
+                  pendingAmount: 0,
+                  transactions: [],
+                };
+
+                return (
+                  <DriverWalletCard
+                    key={driver._id}
+                    driver={driver}
+                    wallet={wallet}
+                    onViewTransactions={() => handleViewTransactions(driver)}
+                    onExport={() => exportDriverCSV(driver, wallet)}
+                  />
+                );
+              })}
+              <Pagination
+                page={page}
+                pages={pages}
+                total={filtered.length}
+                perPage={PER}
+                onChange={setPage}
+              />
+            </div>
+          ) : (
+            !loading && !walletLoading && (
+              <Card style={{ padding: "2rem", textAlign: "center" }}>
+                <Wallet size={48} style={{ color: C.muted, margin: "0 auto 1rem" }} />
+                <p style={{ color: C.muted, fontSize: "1rem" }}>No drivers found</p>
+                <p style={{ color: C.muted, fontSize: "0.8rem", marginTop: 4 }}>
+                  {q ? "Try adjusting your search" : "No drivers registered yet"}
+                </p>
+              </Card>
+            )
+          )}
+
+          {/* All Transactions Modal */}
+          {allTxnDriver && (
+            <AllTransactionsModal
+              driver={allTxnDriver}
+              open={showAllTxnModal}
+              onClose={() => { setShowAllTxnModal(false); setAllTxnDriver(null); }}
+            />
+          )}
+
+          {/* Transaction Detail Modal */}
+          <TransactionDetailModal
+            transaction={selectedTransaction}
+            driverName={selectedDriver?.name ?? "Unknown"}
+            open={showTxnModal}
+            onClose={() => {
+              setShowTxnModal(false);
+              setSelectedTransaction(null);
+            }}
+          />
+        </>
       )}
 
-      {/* All Transactions Modal */}
-      {allTxnDriver && (
-        <AllTransactionsModal
-          driver={allTxnDriver}
-          open={showAllTxnModal}
-          onClose={() => { setShowAllTxnModal(false); setAllTxnDriver(null); }}
-        />
+      {/* WITHDRAWALS TAB */}
+      {tab === "withdrawals" && (
+        <WithdrawalRequestsTab />
       )}
-
-      {/* Transaction Detail Modal */}
-      <TransactionDetailModal
-        transaction={selectedTransaction}
-        driverName={selectedDriver?.name ?? "Unknown"}
-        open={showTxnModal}
-        onClose={() => {
-          setShowTxnModal(false);
-          setSelectedTransaction(null);
-        }}
-      />
     </div>
   );
 }
