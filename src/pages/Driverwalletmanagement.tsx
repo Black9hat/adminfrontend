@@ -903,7 +903,10 @@ function WithdrawalRequestsTab() {
                 <InfoRow label="Processed At" value={new Date(selectedWithdrawal.processedAt).toLocaleString("en-IN")} />
               )}
               {selectedWithdrawal.razorpayPayoutId && (
-                <InfoRow label="Razorpay Payout ID" value={selectedWithdrawal.razorpayPayoutId} style={{ fontFamily: "monospace", fontSize: "0.8rem" }} />
+                <InfoRow
+                  label="Razorpay Payout ID"
+                  value={<span style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>{selectedWithdrawal.razorpayPayoutId}</span>}
+                />
               )}
               {selectedWithdrawal.failureReason && (
                 <InfoRow label="Failure Reason" value={selectedWithdrawal.failureReason} />
