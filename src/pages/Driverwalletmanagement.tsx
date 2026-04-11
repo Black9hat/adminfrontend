@@ -674,6 +674,12 @@ function WithdrawalRequestsTab() {
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [selectedWithdrawal, setSelectedWithdrawal] = useState<any>(null);
+  const [paymentReferenceId, setPaymentReferenceId] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofUrl, setProofUrl] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
   const fetchWithdrawals = useCallback(async () => {
     setLoading(true);
@@ -704,6 +710,139 @@ function WithdrawalRequestsTab() {
   useEffect(() => {
     fetchWithdrawals();
   }, [fetchWithdrawals]);
+
+  useEffect(() => {
+    if (!selectedWithdrawal) return;
+    setPaymentReferenceId(selectedWithdrawal.paymentReferenceId || "");
+    setPaymentNotes(selectedWithdrawal.manualPaymentNotes || "");
+    setProofUrl(selectedWithdrawal.paymentProofImageUrl || "");
+    setProofFile(null);
+  }, [selectedWithdrawal]);
+
+  const updateWithdrawalInList = (updated: any) => {
+    setWithdrawals(prev => prev.map(w => (w._id === updated._id ? { ...w, ...updated } : w)));
+    setSelectedWithdrawal(updated);
+  };
+
+  const uploadProof = async () => {
+    if (!proofFile) {
+      toast.error("Please choose a proof image first");
+      return;
+    }
+
+    setProofUploading(true);
+    try {
+      const token = localStorage.getItem("adminToken");
+      const fd = new FormData();
+      fd.append("proof", proofFile);
+
+      const res = await fetch(`${API_BASE_URL}/api/withdrawal/admin/upload-proof`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: fd,
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Proof upload failed");
+      }
+
+      setProofUrl(data.paymentProofImageUrl || "");
+      toast.success("Proof uploaded successfully");
+    } catch (err: any) {
+      console.error("❌ upload proof failed", err);
+      toast.error(err?.message || "Failed to upload proof");
+    } finally {
+      setProofUploading(false);
+    }
+  };
+
+  const markPaid = async () => {
+    if (!selectedWithdrawal?._id) return;
+
+    if (!paymentReferenceId.trim()) {
+      toast.error("Reference ID is required");
+      return;
+    }
+    if (!proofUrl.trim()) {
+      toast.error("Payment proof is required. Upload image first.");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem("adminToken");
+      const res = await fetch(`${API_BASE_URL}/api/withdrawal/admin/${selectedWithdrawal._id}/mark-paid`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          paymentReferenceId: paymentReferenceId.trim(),
+          paymentProofImageUrl: proofUrl.trim(),
+          notes: paymentNotes.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to mark withdrawal as paid");
+      }
+
+      if (data.withdrawal) {
+        updateWithdrawalInList(data.withdrawal);
+      }
+      toast.success("Withdrawal marked as paid");
+    } catch (err: any) {
+      console.error("❌ mark paid failed", err);
+      toast.error(err?.message || "Failed to mark paid");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const rejectWithdrawal = async () => {
+    if (!selectedWithdrawal?._id) return;
+    const reason = (paymentNotes || "").trim();
+    if (!reason) {
+      toast.error("Enter rejection reason in notes before rejecting");
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem("adminToken");
+      const res = await fetch(`${API_BASE_URL}/api/withdrawal/admin/${selectedWithdrawal._id}/reject`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reason,
+          notes: reason,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to reject withdrawal");
+      }
+
+      if (data.withdrawal) {
+        updateWithdrawalInList(data.withdrawal);
+      }
+      toast.success("Withdrawal rejected and refunded");
+    } catch (err: any) {
+      console.error("❌ reject failed", err);
+      toast.error(err?.message || "Failed to reject withdrawal");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -911,8 +1050,79 @@ function WithdrawalRequestsTab() {
               {selectedWithdrawal.failureReason && (
                 <InfoRow label="Failure Reason" value={selectedWithdrawal.failureReason} />
               )}
+              {selectedWithdrawal.paymentReferenceId && (
+                <InfoRow label="Payment Reference ID" value={selectedWithdrawal.paymentReferenceId} />
+              )}
+              {selectedWithdrawal.paymentProofImageUrl && (
+                <InfoRow label="Payment Proof" value={<a href={selectedWithdrawal.paymentProofImageUrl} target="_blank" rel="noreferrer">View Proof</a>} />
+              )}
+              {selectedWithdrawal.processedByAdminEmail && (
+                <InfoRow label="Processed By" value={selectedWithdrawal.processedByAdminEmail} />
+              )}
+              {selectedWithdrawal.processingMode && (
+                <InfoRow label="Processing Mode" value={selectedWithdrawal.processingMode} />
+              )}
               <InfoRow label="Balance Debited" value={selectedWithdrawal.balanceDebited ? "Yes" : "No"} />
             </div>
+
+            {(selectedWithdrawal.status === "pending" || selectedWithdrawal.status === "processing") && (
+              <div style={{ background: C.surface2, borderRadius: 10, border: "1px solid " + C.border, padding: "1rem" }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Admin Manual Settlement
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <input
+                    value={paymentReferenceId}
+                    onChange={e => setPaymentReferenceId(e.target.value)}
+                    placeholder="Enter transfer reference/UTR ID"
+                    style={{
+                      padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid " + C.border, background: C.bg,
+                      color: "inherit", fontSize: "0.82rem", outline: "none",
+                    }}
+                  />
+
+                  <textarea
+                    value={paymentNotes}
+                    onChange={e => setPaymentNotes(e.target.value)}
+                    placeholder="Notes (required for reject, optional for mark paid)"
+                    rows={3}
+                    style={{
+                      padding: "8px 10px", borderRadius: 8,
+                      border: "1px solid " + C.border, background: C.bg,
+                      color: "inherit", fontSize: "0.82rem", outline: "none", resize: "vertical",
+                    }}
+                  />
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setProofFile(e.target.files?.[0] || null)}
+                      style={{ fontSize: "0.78rem" }}
+                    />
+                    <Btn size="sm" variant="ghost" onClick={uploadProof} loading={proofUploading}>
+                      Upload Proof
+                    </Btn>
+                    {proofUrl && (
+                      <a href={proofUrl} target="_blank" rel="noreferrer" style={{ fontSize: "0.76rem" }}>
+                        Proof Uploaded
+                      </a>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+                    <Btn size="sm" variant="ghost" onClick={rejectWithdrawal} loading={actionLoading}>
+                      Reject + Refund
+                    </Btn>
+                    <Btn size="sm" variant="primary" onClick={markPaid} loading={actionLoading}>
+                      Mark Paid
+                    </Btn>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Webhook events */}
             {selectedWithdrawal.webhookEvents && selectedWithdrawal.webhookEvents.length > 0 && (
