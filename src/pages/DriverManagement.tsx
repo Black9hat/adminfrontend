@@ -11,6 +11,102 @@ import axiosInstance from "../api/axiosInstance";
 
 const PER = 25;
 
+// ============================================
+// HELPER: Format Label from Key
+// ============================================
+const formatLabel = (key: string): string => {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (str: string) => str.toUpperCase())
+    .trim();
+};
+
+// ============================================
+// DOCUMENT CONFIGURATIONS
+// ============================================
+const DOCUMENT_CONFIGS: Record<string, { displayName: string; fields: Array<{ label: string; key: string }> }> = {
+  rc: {
+    displayName: "Vehicle RC",
+    fields: [
+      { label: "Owner Name", key: "fullName" },
+      { label: "Registration Number", key: "licenseNumber" },
+      { label: "Engine Number", key: "engineNumber" },
+      { label: "Model", key: "model" },
+      { label: "Registration Date", key: "registrationDate" },
+      { label: "Validity Date", key: "validity" },
+      { label: "Chassis Number", key: "chassisNumber" },
+      { label: "Vehicle Class", key: "vehicleClass" },
+      { label: "Address", key: "address" },
+    ],
+  },
+  pan: {
+    displayName: "PAN Card",
+    fields: [
+      { label: "PAN Number", key: "licenseNumber" },
+      { label: "Full Name", key: "fullName" },
+      { label: "Date of Birth", key: "dob" },
+    ],
+  },
+  aadhaar: {
+    displayName: "Aadhaar Card",
+    fields: [
+      { label: "Aadhaar Number", key: "licenseNumber" },
+      { label: "Name", key: "fullName" },
+      { label: "Date of Birth", key: "dob" },
+      { label: "Mobile No", key: "mobile" },
+      { label: "Address", key: "address" },
+    ],
+  },
+  license: {
+    displayName: "Driving License",
+    fields: [
+      { label: "Driving License No", key: "licenseNumber" },
+      { label: "Name", key: "fullName" },
+      { label: "Date of Birth", key: "dob" },
+      { label: "Son/Daughter/Wife of", key: "fatherOrSpouseName" },
+      { label: "Address", key: "address" },
+      { label: "Validity", key: "validity" },
+      { label: "State of Issue", key: "state" },
+      { label: "Class of Vehicles", key: "vehicleClass" },
+    ],
+  },
+  fitnesscertificate: {
+    displayName: "Fitness Certificate",
+    fields: [
+      { label: "Registration Number", key: "licenseNumber" },
+      { label: "FC Number", key: "fcNumber" },
+      { label: "Class of Vehicle", key: "vehicleClass" },
+      { label: "FC Issued By", key: "issuedBy" },
+      { label: "FC Valid Upto", key: "validity" },
+    ],
+  },
+  insurance: {
+    displayName: "Insurance",
+    fields: [
+      { label: "Insurance Certificate No", key: "licenseNumber" },
+      { label: "Company", key: "company" },
+      { label: "Valid Upto", key: "validity" },
+    ],
+  },
+  permit: {
+    displayName: "Permit",
+    fields: [
+      { label: "Permit Number", key: "licenseNumber" },
+      { label: "Permit Issued By", key: "issuedBy" },
+      { label: "Permit Valid Upto", key: "validity" },
+    ],
+  },
+  profile: {
+    displayName: "Profile Photo",
+    fields: [],
+  },
+};
+
+const getDocConfig = (docType: string) => {
+  const normalized = docType.toLowerCase().trim();
+  return DOCUMENT_CONFIGS[normalized] || { displayName: docType, fields: [] };
+};
+
 export default function DriverManagement() {
   const { drivers, loading, error, refetch } = useDrivers();
   const { trips } = useTrips();
@@ -24,6 +120,9 @@ export default function DriverManagement() {
   const [docsOpen, setDO]   = useState(false);
   const [docs, setDocs]     = useState<any[]>([]);
   const [docsLoading, setDL]= useState(false);
+  const [savedDocsOpen, setSavedDO] = useState(false);
+  const [savedDocs, setSavedDocs] = useState<any[]>([]);
+  const [savedDocsLoading, setSavedDL] = useState(false);
 
   const tok = () => localStorage.getItem("adminToken") || "";
   const hdrs = { Authorization: "Bearer " + tok(), "ngrok-skip-browser-warning": "true" };
@@ -64,6 +163,50 @@ export default function DriverManagement() {
       setDocs(r.data.docs ?? r.data.documents ?? []);
     } catch { setDocs([]); }
     finally { setDL(false); }
+  };
+
+  const loadSavedDocs = async (phone: string) => {
+    setSavedDL(true);
+    try {
+      const r = await axiosInstance.get("/admin/saved-documents/" + phone, { headers: hdrs });
+      setSavedDocs(r.data.files ?? []);
+    } catch (err) {
+      console.error("Error loading saved documents:", err);
+      setSavedDocs([]);
+    } finally {
+      setSavedDL(false);
+    }
+  };
+
+  const downloadSavedDocToComputer = async (file: any) => {
+    if (!sel?.phone) return;
+
+    const fileName = file?.name || file;
+    if (!fileName) return;
+
+    try {
+      const response = await axiosInstance.get(
+        `/admin/saved-documents/${encodeURIComponent(sel.phone)}/${encodeURIComponent(fileName)}`,
+        {
+          headers: hdrs,
+          responseType: "blob",
+        }
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast.success("Download started");
+    } catch (err: any) {
+      console.error("Saved document download failed:", err);
+      toast.error(err?.response?.data?.message || "Failed to download file");
+    }
   };
 
   const doAction = async () => {
@@ -212,39 +355,280 @@ export default function DriverManagement() {
       </Modal>
 
       {/* KYC Documents modal */}
-      <Modal open={docsOpen} onClose={() => setDO(false)} title={(sel?.name ?? "Driver") + " — KYC Documents"} width={620}>
+      <Modal open={docsOpen} onClose={() => setDO(false)} title={(sel?.name ?? "Driver") + " — KYC Documents"} width={900}>
+        {/* View Saved Folder Button */}
+        {sel && (
+          <div style={{ marginBottom: "1rem", display: "flex", gap: 8 }}>
+            <Btn 
+              variant="ghost" 
+              icon={<FileText size={13}/>}
+              onClick={() => { loadSavedDocs(sel.phone); setSavedDO(true); }}
+            >
+              📁 View Saved Folder
+            </Btn>
+          </div>
+        )}
+
         {docsLoading
           ? <Spinner label="Loading documents…" />
           : docs.length === 0
           ? <div style={{ padding: "2rem", textAlign: "center", color: C.muted, fontSize: "0.85rem" }}>No documents uploaded yet — driver needs to upload via app</div>
-          : docs.map(doc => (
-            <div key={doc._id} style={{ borderBottom: "1px solid " + C.border, paddingBottom: "1rem", marginBottom: "1rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                <div style={{ fontWeight: 700 }}>{doc.docType ?? doc.type ?? "Document"}</div>
-                {/* ✅ FIX 2: DriverDoc uses doc.status — not isVerified/isRejected boolean fields */}
-                <Badge
-                  status={doc.status === "approved" || doc.status === "verified" ? "active" : doc.status === "rejected" ? "blocked" : "pending"}
-                  label={doc.status === "approved" || doc.status === "verified" ? "Verified" : doc.status === "rejected" ? "Rejected" : "Pending"}
-                />
-              </div>
-              {doc.imageUrl && <img src={doc.imageUrl} alt={doc.docType} style={{ width: "100%", maxHeight: 200, objectFit: "cover", borderRadius: 10, marginBottom: 8 }} />}
-              <InfoRow label="Doc Number" value={doc.extractedData?.licenseNumber ?? doc.docNumber ?? "—"} />
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <Btn size="sm" variant="success" icon={<CheckCircle size={11}/>} onClick={async () => {
-                  // ✅ FIX 3: verifyDriverDocument expects { status: "approved" } — not { isVerified: true }
-                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { status: "approved" });
-                  if (ok) { toast.success("Document approved"); loadDocs(sel._id); }
-                  else toast.error("Approve failed");
-                }}>Approve</Btn>
-                <Btn size="sm" variant="danger" icon={<XCircle size={11}/>} onClick={async () => {
-                  // ✅ FIX 3: verifyDriverDocument expects { status: "rejected" } — not { isVerified: false, isRejected: true }
-                  const { ok } = await mutate("put", "/admin/verifyDocument/" + doc._id, { status: "rejected", remarks: "Rejected by admin" });
-                  if (ok) { toast.success("Document rejected"); loadDocs(sel._id); }
-                  else toast.error("Reject failed");
-                }}>Reject</Btn>
-              </div>
-            </div>
-          ))}
+          : (() => {
+              // Group documents by docType
+              const grouped: Record<string, any[]> = {};
+              docs.forEach(doc => {
+                const type = doc.docType ?? "Document";
+                if (!grouped[type]) grouped[type] = [];
+                grouped[type].push(doc);
+              });
+              
+              return Object.entries(grouped).map(([docType, typeDocs]) => {
+                // Sort to show front first
+                const sorted = typeDocs.sort((a, b) => {
+                  if ((a.side ?? "") === "front") return -1;
+                  if ((b.side ?? "") === "front") return 1;
+                  return 0;
+                });
+
+                const docConfig = getDocConfig(docType);
+                const allVerified = sorted.every(d => d.status === "approved" || d.status === "verified");
+                const someRejected = sorted.some(d => d.status === "rejected");
+
+                return (
+                  <div key={docType} style={{ marginBottom: "2.5rem", paddingBottom: "1.5rem", borderBottom: "1px solid " + C.border }}>
+                    {/* Document Type Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "1.2rem", color: C.text }}>{docConfig.displayName}</div>
+                        <div style={{ fontSize: "0.8rem", color: C.muted, marginTop: "0.25rem" }}>Document Type: {docType}</div>
+                      </div>
+                      <Badge
+                        status={allVerified ? "active" : someRejected ? "blocked" : "pending"}
+                        label={allVerified ? "✓ Verified" : someRejected ? "✕ Rejected" : "⏳ Pending"}
+                      />
+                    </div>
+
+                    {/* Document Slides */}
+                    <div style={{ display: "grid", gridTemplateColumns: sorted.length > 1 ? "repeat(2, 1fr)" : "1fr", gap: "1.5rem" }}>
+                      {(() => {
+                        // Deduplicate: If front and back have same extracted data, show only front
+                        const toDisplay = sorted.filter((doc) => {
+                          if (sorted.length > 1) {
+                            const docSide = (doc.side ?? "").toLowerCase().trim();
+                            if (docSide === "back") {
+                              const frontDoc = sorted.find(d => (d.side ?? "").toLowerCase().trim() === "front");
+                              if (frontDoc && JSON.stringify(frontDoc.extractedData) === JSON.stringify(doc.extractedData)) {
+                                return false; // Skip back if identical to front
+                              }
+                            }
+                          }
+                          return true;
+                        });
+
+                        return toDisplay.map((doc) => {
+                          const side = doc.side ?? "front";
+                          const isVerified = doc.status === "approved" || doc.status === "verified";
+                          const isRejected = doc.status === "rejected";
+
+                          return (
+                            <div
+                              key={doc._id}
+                              style={{
+                                border: isVerified ? "2px solid #10b981" : isRejected ? "2px solid #ef4444" : "2px solid #3b82f6",
+                                borderRadius: 14,
+                                padding: "1.5rem",
+                                background: isVerified ? "rgba(16,185,129,0.1)" : isRejected ? "rgba(239,68,68,0.1)" : "#1a2332",
+                                transition: "all 0.2s",
+                              }}
+                            >
+                              {/* Slide Header - Side & Status */}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
+                                <div style={{
+                                  fontSize: "0.85rem",
+                                  fontWeight: 700,
+                                  textTransform: "uppercase",
+                                  color: side === "front" ? "rgb(59, 130, 246)" : "rgb(236, 72, 153)",
+                                  letterSpacing: "0.05em",
+                                }}>
+                                  {side === "front" ? "🔵 FRONT SIDE" : side === "back" ? "🔴 BACK SIDE" : "📄 DOCUMENT"}
+                                </div>
+                                <Badge
+                                  status={isVerified ? "active" : isRejected ? "blocked" : "pending"}
+                                  label={isVerified ? "Verified" : isRejected ? "Rejected" : "Pending"}
+                                />
+                              </div>
+
+                              {/* Extracted Data Fields - Formatted by Config */}
+                              <div style={{ fontSize: "0.85rem", lineHeight: 2 }}>
+                                {doc.extractedData && Object.keys(doc.extractedData).length > 0 ? (
+                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem 1rem" }}>
+                                    {docConfig.fields.length > 0 ? (
+                                      // Show only configured fields for this document type
+                                      docConfig.fields.map((fieldConfig) => {
+                                        const value = doc.extractedData[fieldConfig.key];
+                                        let displayValue = "—";
+
+                                        if (value) {
+                                          if (Array.isArray(value)) {
+                                            displayValue = value.length > 0 ? value.join(", ") : "—";
+                                          } else if (typeof value === "string") {
+                                            displayValue = value.trim() || "—";
+                                          } else if (typeof value === "boolean") {
+                                            displayValue = value ? "Yes" : "No";
+                                          } else {
+                                            displayValue = String(value);
+                                          }
+                                        }
+
+                                        return (
+                                          <div key={fieldConfig.key}>
+                                            <div style={{ fontWeight: 600, color: "#e0e7ff", fontSize: "0.8rem", marginBottom: "0.25rem" }}>
+                                              {fieldConfig.label}
+                                            </div>
+                                            <div style={{
+                                              color: "#ffffff",
+                                              fontFamily: displayValue === "—" ? "inherit" : "monospace",
+                                              fontWeight: 500,
+                                              fontSize: "0.8rem",
+                                              wordBreak: "break-word",
+                                              padding: "0.5rem",
+                                              backgroundColor: displayValue === "—" ? "transparent" : "rgba(59, 130, 246, 0.3)",
+                                              borderRadius: 6,
+                                              border: displayValue === "—" ? "1px solid rgba(255,255,255,0.1)" : "1px solid rgba(59, 130, 246, 0.5)",
+                                            }}>
+                                              {displayValue}
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      // Fallback: show all extracted data
+                                      Object.entries(doc.extractedData).map(([key, value]) => {
+                                        if (key === "vehicleTypesVerified" || key.startsWith("_") || !value) return null;
+
+                                        let displayValue = "—";
+                                        if (Array.isArray(value)) {
+                                          displayValue = value.length > 0 ? value.join(", ") : "—";
+                                        } else if (typeof value === "string") {
+                                          displayValue = value.trim() || "—";
+                                        } else if (typeof value === "boolean") {
+                                          displayValue = value ? "Yes" : "No";
+                                        } else {
+                                          displayValue = String(value);
+                                        }
+
+                                        return (
+                                          <div key={key}>
+                                            <div style={{ fontWeight: 600, color: "#e0e7ff", fontSize: "0.8rem", marginBottom: "0.25rem" }}>
+                                              {formatLabel(key)}
+                                            </div>
+                                            <div style={{
+                                              color: "#ffffff",
+                                              fontFamily: "monospace",
+                                              fontWeight: 500,
+                                              fontSize: "0.8rem",
+                                              wordBreak: "break-word",
+                                              padding: "0.5rem",
+                                              backgroundColor: "rgba(59, 130, 246, 0.3)",
+                                              borderRadius: 6,
+                                              border: "1px solid rgba(59, 130, 246, 0.5)",
+                                            }}>
+                                              {displayValue}
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div style={{ color: "#9ca3af", fontStyle: "italic", fontSize: "0.85rem", padding: "1rem" }}>
+                                    No data extracted
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Remarks (if rejected) */}
+                              {isRejected && doc.remarks && (
+                                <div style={{
+                                  marginTop: "1rem",
+                                  padding: "0.75rem",
+                                  backgroundColor: "rgba(239,68,68,0.1)",
+                                  borderRadius: 8,
+                                  borderLeft: "3px solid #ef4444",
+                                }}>
+                                  <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "#dc2626", marginBottom: "0.25rem" }}>⚠️ Rejection Remarks:</div>
+                                  <div style={{ fontSize: "0.75rem", color: "#991b1b", lineHeight: 1.5 }}>{doc.remarks}</div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+      </Modal>
+
+      {/* Saved Documents Modal */}
+      <Modal
+        open={savedDocsOpen}
+        onClose={() => setSavedDO(false)}
+        title={`${sel?.name ?? "Driver"} — Saved Documents`}
+        width={900}
+      >
+        {savedDocsLoading ? (
+          <div style={{ padding: "2rem", textAlign: "center" }}>
+            <Spinner label="Loading saved documents…" />
+          </div>
+        ) : savedDocs.length === 0 ? (
+          <div style={{
+            padding: "2rem",
+            textAlign: "center",
+            color: "#6b7280",
+            fontSize: "0.95rem",
+          }}>
+            No saved documents found for this driver
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: "0.9rem",
+            }}>
+              <thead>
+                <tr style={{ borderBottom: "2px solid #e5e7eb" }}>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>File Name</th>
+                  <th style={{ padding: "0.75rem", textAlign: "left", fontWeight: 600, color: "#374151" }}>Size</th>
+                  <th style={{ padding: "0.75rem", textAlign: "center", fontWeight: 600, color: "#374151" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {savedDocs.map((file: any, idx: number) => (
+                  <tr key={idx} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "0.75rem", color: "#1f2937" }}>
+                      {file.name || file}
+                    </td>
+                    <td style={{ padding: "0.75rem", color: "#6b7280" }}>
+                      {file.size ? `${(file.size / 1024).toFixed(2)} KB` : "–"}
+                    </td>
+                    <td style={{ padding: "0.75rem", textAlign: "center" }}>
+                      <Btn
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadSavedDocToComputer(file)}
+                      >
+                        📥 Download
+                      </Btn>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Modal>
 
       {/* Confirm actions */}
