@@ -1890,7 +1890,7 @@ const DocumentsPage: React.FC = () => {
             <button onClick={fetchDriversWithDocStatus} className="mt-4 px-6 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-colors">
               Try Again
             </button>
-          </div>
+          </div> 
         )}
 
         {!loading && !error && (
