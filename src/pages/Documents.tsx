@@ -194,7 +194,7 @@ const DOCUMENT_CONFIGS: Record<string, DocumentTypeConfig> = {
     ],
   },
   profile: {
-    aliases: ["profile", "profile_photo", "selfie", "photo"],
+    aliases: ["profile", "profile_photo", "profilephoto", "profile_picture", "profilepicture", "selfie", "photo"],
     displayName: "Profile Photo",
     verifyLink: undefined,
     hasFrontBack: false,
@@ -226,6 +226,15 @@ const getVerificationLink = (docType: string): string | undefined => {
 
 const getDocumentDisplayName = (docType: string): string => {
   return getDocumentConfig(docType)?.displayName || docType.replace(/_/g, " ").toUpperCase();
+};
+
+const isProfileDocType = (docType: string): boolean => {
+  const normalizedType = (docType || "").toLowerCase().trim().replace(/[\s-]+/g, "_");
+  if (["profile", "profile_photo", "profilephoto", "profile_picture", "profilepicture", "selfie", "photo"].includes(normalizedType)) {
+    return true;
+  }
+  const config = getDocumentConfig(docType);
+  return config?.displayName === "Profile Photo";
 };
 
 // ============================================
@@ -820,6 +829,29 @@ const DocumentsPage: React.FC = () => {
     fetchDriversWithDocStatus();
   }, [fetchDriversWithDocStatus]);
 
+  useEffect(() => {
+    const refreshDocuments = () => {
+      fetchDriversWithDocStatus();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshDocuments();
+      }
+    };
+
+    const intervalId = window.setInterval(refreshDocuments, 20000);
+
+    window.addEventListener("focus", refreshDocuments);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshDocuments);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [fetchDriversWithDocStatus]);
+
   // ============================================
   // LOCAL STATE UPDATE ON VERIFY/REJECT
   // ============================================
@@ -903,9 +935,11 @@ const DocumentsPage: React.FC = () => {
     if (!authToken) { alert("❌ Please login to verify documents"); return; }
     if (status === "rejected" && !remarks.trim()) { alert("Please add remarks for rejection."); return; }
 
+    const shouldSkipSaveForProfile = isProfileDocType(selectedDoc?.docType || "");
+
     // If approving and FS API is supported but no folder picked yet, prompt now
     let rootDir = saveFolderHandle || globalRootDirHandle;
-    if (status === "verified" && fsApiSupported && !rootDir) {
+    if (status === "verified" && !shouldSkipSaveForProfile && fsApiSupported && !rootDir) {
       const confirmed = window.confirm(
         "📁 Please select a root folder where driver documents will be saved.\n\n" +
         "A subfolder like '7013417780_car/' will be created automatically inside it.\n\n" +
@@ -963,8 +997,10 @@ const DocumentsPage: React.FC = () => {
         await axiosInstance.put(`/admin/verifyDocument/${id}`, payload, { headers });
       }
 
-      // 2️⃣ If approved: save each doc file into the subfolder
-      if (status === "verified" && selectedDriver) {
+      const allDocsAreProfile = docsToVerifyData.length > 0 && docsToVerifyData.every((d) => isProfileDocType(d.docType || ""));
+
+      // 2️⃣ If approved: save each doc file into the subfolder (except profile photo)
+      if (status === "verified" && selectedDriver && !allDocsAreProfile) {
         const phone = selectedDriver.phone || "unknown";
         const vehicleType = selectedDriver.vehicleType || "vehicle";
 
@@ -1571,6 +1607,7 @@ const DocumentsPage: React.FC = () => {
     if (!selectedDoc) return null;
     const isPending = selectedDoc.status === "pending";
     const isRejected = selectedDoc.status === "rejected";
+    const isProfileDocument = isProfileDocType(selectedDoc.docType || "");
     const frontDoc = selectedDoc.side === "back" ? backDoc : selectedDoc;
     const backDocDisplay = selectedDoc.side === "back" ? selectedDoc : backDoc;
     const docType = selectedDoc.docType || "";
@@ -1716,21 +1753,22 @@ const DocumentsPage: React.FC = () => {
 
                 {isPending && (
                   <div className="space-y-3 pt-4 border-t">
-                    {/* Save path preview */}
-                    <div className={`flex items-center gap-2 p-3 rounded-xl border text-sm ${saveFolderName ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
-                      {saveFolderName ? <FolderCheck size={16} className="flex-shrink-0" /> : <FolderOpen size={16} className="flex-shrink-0" />}
-                      <span>
-                        Saves to{" "}
-                        <code className={`px-1 rounded font-mono text-xs ${saveFolderName ? "bg-emerald-100" : "bg-amber-100"}`}>
-                          {fullSavePath}/{docType}_{"{side}"}.jpg
-                        </code>
-                      </span>
-                      {!saveFolderName && fsApiSupported && (
-                        <button onClick={handlePickSaveFolder} className="ml-auto text-xs underline whitespace-nowrap">
-                          Pick folder
-                        </button>
-                      )}
-                    </div>
+                    {!isProfileDocument && (
+                      <div className={`flex items-center gap-2 p-3 rounded-xl border text-sm ${saveFolderName ? "bg-emerald-50 border-emerald-200 text-emerald-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
+                        {saveFolderName ? <FolderCheck size={16} className="flex-shrink-0" /> : <FolderOpen size={16} className="flex-shrink-0" />}
+                        <span>
+                          Saves to{" "}
+                          <code className={`px-1 rounded font-mono text-xs ${saveFolderName ? "bg-emerald-100" : "bg-amber-100"}`}>
+                            {fullSavePath}/{docType}_{"{side}"}.jpg
+                          </code>
+                        </span>
+                        {!saveFolderName && fsApiSupported && (
+                          <button onClick={handlePickSaveFolder} className="ml-auto text-xs underline whitespace-nowrap">
+                            Pick folder
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <button
                       onClick={() => handleVerifyDocument(selectedDoc._id, "verified")}
@@ -1738,7 +1776,7 @@ const DocumentsPage: React.FC = () => {
                       className="w-full bg-gradient-to-r from-emerald-500 to-green-600 text-white py-4 rounded-xl hover:from-emerald-600 hover:to-green-700 transition-all font-semibold shadow-lg hover:shadow-xl disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                       {processing ? <Loader2 size={20} className="animate-spin" /> : <CheckCircle size={20} />}
-                      {processing ? "Approving & Saving..." : `Approve & Save to ${subfolderName}/`}
+                      {processing ? (isProfileDocument ? "Approving..." : "Approving & Saving...") : (isProfileDocument ? "Approve Document" : `Approve & Save to ${subfolderName}/`)}
                     </button>
 
                     <div className="space-y-2">
