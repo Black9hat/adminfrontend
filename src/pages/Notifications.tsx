@@ -176,12 +176,14 @@ const NotificationPage: React.FC = () => {
       }
 
       if (mode === "broadcast") {
+        const broadcastRole = role === "all" ? "all" : role;
+
         await axios.post(
           `${API_BASE_URL}/api/admin/send-fcm`,
           {
             title,
             body,
-            role: role === "all" ? undefined : role,
+            role: broadcastRole,
             type: notificationType,
             imageUrl: uploadedImageUrl,
           },
