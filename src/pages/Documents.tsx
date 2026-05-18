@@ -485,6 +485,29 @@ const getVehicleDisplayLabel = (vehicleType?: string, seats?: number | null): st
   return vehicleType.charAt(0).toUpperCase() + vehicleType.slice(1);
 };
 
+const buildDocumentSnapshot = (drivers: Driver[]): string => {
+  const normalizedDrivers = [...drivers]
+    .sort((left, right) => left._id.localeCompare(right._id))
+    .map((driver) => ({
+      id: driver._id,
+      vehicleType: driver.vehicleType || "",
+      seats: driver.seats ?? null,
+      documents: [...driver.documents]
+        .sort((left, right) => left._id.localeCompare(right._id))
+        .map((doc) => ({
+          id: doc._id,
+          docType: (doc.docType || "").toLowerCase(),
+          side: doc.side || "",
+          status: (doc.status || "").toLowerCase(),
+          remarks: doc.remarks || "",
+          createdAt: doc.createdAt || "",
+          extractedData: JSON.stringify(doc.extractedData || {}),
+        })),
+    }));
+
+  return JSON.stringify(normalizedDrivers);
+};
+
 // ============================================
 // SUB COMPONENTS
 // ============================================
@@ -688,6 +711,7 @@ const DocumentsPage: React.FC = () => {
   const [isImageModalOpen, setImageModalOpen] = useState(false);
   const [zoomImageDocId, setZoomImageDocId] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ============================================
   // 📁 SAVE FOLDER STATE
@@ -704,6 +728,7 @@ const DocumentsPage: React.FC = () => {
     folderName: string;
     files: { path: string; success: boolean; error?: string }[];
   } | null>(null);
+  const documentSnapshotRef = useRef("");
 
   const [editableData, setEditableData] = useState<ExtractedData>({
     licenseNumber: "",
@@ -745,14 +770,15 @@ const DocumentsPage: React.FC = () => {
   // ============================================
   // FETCH DRIVERS WITH DOCUMENTS
   // ============================================
-  const fetchDriversWithDocStatus = useCallback(async () => {
+  const fetchDriversWithDocStatus = useCallback(async (options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? false;
     const authToken = getAuthToken();
     if (!authToken) {
       setError("❌ Please login to view documents");
-      setLoading(false);
+      if (showLoading) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError("");
     try {
       const headers = getApiHeaders(authToken);
@@ -809,9 +835,19 @@ const DocumentsPage: React.FC = () => {
         }
       }
 
-      setPendingDrivers(Array.from(pendingMap.values()));
-      setRejectedDrivers(Array.from(rejectedMap.values()));
-      setVerifiedDrivers(Array.from(verifiedMap.values()));
+      const nextPendingDrivers = Array.from(pendingMap.values());
+      const nextRejectedDrivers = Array.from(rejectedMap.values());
+      const nextVerifiedDrivers = Array.from(verifiedMap.values());
+      const nextSnapshot = buildDocumentSnapshot([...nextPendingDrivers, ...nextRejectedDrivers, ...nextVerifiedDrivers]);
+
+      if (nextSnapshot === documentSnapshotRef.current) {
+        return;
+      }
+
+      documentSnapshotRef.current = nextSnapshot;
+      setPendingDrivers(nextPendingDrivers);
+      setRejectedDrivers(nextRejectedDrivers);
+      setVerifiedDrivers(nextVerifiedDrivers);
     } catch (err: any) {
       if (err.response?.status === 401 || err.response?.status === 403) {
         setError("❌ Authentication failed. Please login again.");
@@ -821,36 +857,27 @@ const DocumentsPage: React.FC = () => {
         setError(err.response?.data?.message || "Failed to load documents.");
       }
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchDriversWithDocStatus();
+    fetchDriversWithDocStatus({ showLoading: true });
   }, [fetchDriversWithDocStatus]);
 
   useEffect(() => {
-    const refreshDocuments = () => {
-      fetchDriversWithDocStatus();
-    };
+    documentSnapshotRef.current = buildDocumentSnapshot([...pendingDrivers, ...rejectedDrivers, ...verifiedDrivers]);
+  }, [pendingDrivers, rejectedDrivers, verifiedDrivers]);
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        refreshDocuments();
-      }
-    };
-
-    const intervalId = window.setInterval(refreshDocuments, 20000);
-
-    window.addEventListener("focus", refreshDocuments);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener("focus", refreshDocuments);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [fetchDriversWithDocStatus]);
+  const refreshDocuments = useCallback(async () => {
+    if (loading || refreshing) return;
+    setRefreshing(true);
+    try {
+      await fetchDriversWithDocStatus({ showLoading: false });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchDriversWithDocStatus, loading, refreshing]);
 
   // ============================================
   // LOCAL STATE UPDATE ON VERIFY/REJECT
@@ -1323,12 +1350,12 @@ const DocumentsPage: React.FC = () => {
             />
           </div>
           <button
-            onClick={fetchDriversWithDocStatus}
-            disabled={loading}
+            onClick={refreshDocuments}
+            disabled={loading || refreshing}
             className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
+            <RefreshCw size={20} className={refreshing ? "animate-spin" : ""} />
           </button>
         </div>
       </div>
@@ -1887,7 +1914,7 @@ const DocumentsPage: React.FC = () => {
           <div className="bg-rose-50 border border-rose-200 rounded-2xl p-8 text-center">
             <AlertCircle size={48} className="mx-auto text-rose-600 mb-4" />
             <p className="text-rose-700 font-medium">{error}</p>
-            <button onClick={fetchDriversWithDocStatus} className="mt-4 px-6 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-colors">
+            <button onClick={refreshDocuments} className="mt-4 px-6 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700 transition-colors">
               Try Again
             </button>
           </div>
