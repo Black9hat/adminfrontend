@@ -1352,10 +1352,10 @@ const DocumentsPage: React.FC = () => {
           <button
             onClick={refreshDocuments}
             disabled={loading || refreshing}
-            className="p-2.5 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors disabled:opacity-50"
+            className="p-2.5 bg-white border border-gray-200 text-indigo-600 hover:bg-indigo-50 rounded-xl shadow-sm transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            <RefreshCw size={20} className={refreshing ? "animate-spin" : ""} />
+            <RefreshCw size={20} className={refreshing ? "animate-spin text-indigo-600" : "text-indigo-600"} />
           </button>
         </div>
       </div>
