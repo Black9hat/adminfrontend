@@ -32,6 +32,8 @@ interface FareRate {
   _id: string;
   vehicleType: string;
   category?: string;
+  city?: string;
+  state?: string;
   baseFare: number;
   perKm: number;
   perMin?: number;
@@ -43,6 +45,7 @@ interface FareRate {
   gstPercent?: number;
   perRideIncentive?: number;
   perRideCoins?: number;
+  isActive?: boolean;
 }
 
 const COLORS = {
@@ -118,6 +121,8 @@ const FareManagement: React.FC = () => {
       const updatePayload = {
         vehicleType: rate.vehicleType,
         category: rate.category,
+        city: rate.city,
+        state: rate.state,
         baseFare: rate.baseFare,
         perKm: rate.perKm,
         perMin: rate.perMin,
@@ -129,6 +134,7 @@ const FareManagement: React.FC = () => {
         gstPercent: rate.gstPercent,
         perRideIncentive: rate.perRideIncentive,
         perRideCoins: rate.perRideCoins,
+        isActive: rate.isActive,
       };
 
       await axiosInstance.put(`${API_BASE}/update/${rate._id}`, updatePayload);
