@@ -115,16 +115,20 @@ const FareManagement: React.FC = () => {
   const handleSave = async (rate: FareRate) => {
     try {
       setSavingId(rate._id);
-      const {
-        _id,
-        __v,
-        createdAt,
-        updatedAt,
-        ...updatePayload
-      } = rate as FareRate & {
-        __v?: number;
-        createdAt?: string;
-        updatedAt?: string;
+      const updatePayload = {
+        vehicleType: rate.vehicleType,
+        category: rate.category,
+        baseFare: rate.baseFare,
+        perKm: rate.perKm,
+        perMin: rate.perMin,
+        minFare: rate.minFare,
+        manualSurge: rate.manualSurge,
+        peakMultiplier: rate.peakMultiplier,
+        nightMultiplier: rate.nightMultiplier,
+        platformFeePercent: rate.platformFeePercent,
+        gstPercent: rate.gstPercent,
+        perRideIncentive: rate.perRideIncentive,
+        perRideCoins: rate.perRideCoins,
       };
 
       await axiosInstance.put(`${API_BASE}/update/${rate._id}`, updatePayload);
