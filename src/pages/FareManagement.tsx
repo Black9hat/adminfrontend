@@ -116,33 +116,34 @@ const FareManagement: React.FC = () => {
   };
 
   const handleSave = async (rate: FareRate) => {
+    const updatePayload = {
+      vehicleType: rate.vehicleType,
+      category: rate.category,
+      city: rate.city,
+      state: rate.state,
+      baseFare: rate.baseFare,
+      perKm: rate.perKm,
+      perMin: rate.perMin,
+      minFare: rate.minFare,
+      manualSurge: rate.manualSurge,
+      peakMultiplier: rate.peakMultiplier,
+      nightMultiplier: rate.nightMultiplier,
+      platformFeePercent: rate.platformFeePercent,
+      gstPercent: rate.gstPercent,
+      perRideIncentive: rate.perRideIncentive,
+      perRideCoins: rate.perRideCoins,
+      isActive: rate.isActive,
+    };
+
     try {
       setSavingId(rate._id);
-      const updatePayload = {
-        vehicleType: rate.vehicleType,
-        category: rate.category,
-        city: rate.city,
-        state: rate.state,
-        baseFare: rate.baseFare,
-        perKm: rate.perKm,
-        perMin: rate.perMin,
-        minFare: rate.minFare,
-        manualSurge: rate.manualSurge,
-        peakMultiplier: rate.peakMultiplier,
-        nightMultiplier: rate.nightMultiplier,
-        platformFeePercent: rate.platformFeePercent,
-        gstPercent: rate.gstPercent,
-        perRideIncentive: rate.perRideIncentive,
-        perRideCoins: rate.perRideCoins,
-        isActive: rate.isActive,
-      };
-
       await axiosInstance.put(`${API_BASE}/update/${rate._id}`, updatePayload);
       toast.success(`Updated ${rate.vehicleType} fare successfully`);
       fetchRates();
     } catch (err) {
-      console.error("Save failed:", err);
-      toast.error("Failed to save changes");
+      const responseError = (err as any)?.response?.data;
+      console.error("Save failed:", responseError || err, updatePayload);
+      toast.error(responseError?.message || "Failed to save changes");
     } finally {
       setSavingId(null);
     }
