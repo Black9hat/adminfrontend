@@ -1,6 +1,7 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import io from 'socket.io-client';
+import { OlaMaps, defaultStyleJson } from 'olamaps-web-sdk';
 import { 
   Bell, 
   Phone, 
@@ -31,6 +32,7 @@ import {
 } from 'lucide-react';
 
 const API_BASE = 'https://ghumobackend.onrender.com';
+const MAPS_KEY = import.meta.env.VITE_OLA_MAPS_KEY ?? '';
 const getAuthToken = () => localStorage.getItem("adminToken") || "";
 
 // ✅ FIX: Removed Cache-Control and Pragma headers.
@@ -79,6 +81,12 @@ interface SupportTrip {
   issueType?: string;
   priority?: 'low' | 'medium' | 'high' | 'critical';
   isSOS?: boolean;
+  sosLocation?: {
+    lat: number;
+    lng: number;
+    updatedAt: string;
+    sosType?: string;
+  };
   autoChatAttempted?: boolean;
   autoChatTranscript?: Array<{
     sender: string;
@@ -147,6 +155,136 @@ const isValidPriority = (p: string | undefined): p is 'low' | 'medium' | 'high' 
   return p === 'low' || p === 'medium' || p === 'high' || p === 'critical';
 };
 
+function SOSLiveMap({
+  location,
+  pickup,
+  drop,
+}: {
+  location?: { lat: number; lng: number };
+  pickup?: [number, number];
+  drop?: [number, number];
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+
+  const points = useMemo(() => {
+    const all: Array<{ lng: number; lat: number; type: 'sos' | 'pickup' | 'drop' }> = [];
+    if (location) all.push({ lng: location.lng, lat: location.lat, type: 'sos' });
+    if (pickup && pickup.length === 2) all.push({ lng: pickup[0], lat: pickup[1], type: 'pickup' });
+    if (drop && drop.length === 2) all.push({ lng: drop[0], lat: drop[1], type: 'drop' });
+    return all;
+  }, [drop, location, pickup]);
+
+  useEffect(() => {
+    if (!MAPS_KEY || !containerRef.current || points.length === 0) return;
+
+    let cancelled = false;
+    const markers: any[] = [];
+
+    const cleanup = () => {
+      markers.forEach(marker => marker.remove?.());
+      markers.length = 0;
+      if (mapRef.current) {
+        mapRef.current.remove?.();
+        mapRef.current = null;
+      }
+    };
+
+    const createMarkerElement = (type: 'sos' | 'pickup' | 'drop') => {
+      const colors: Record<'sos' | 'pickup' | 'drop', string> = {
+        sos: '#ef4444',
+        pickup: '#16a34a',
+        drop: '#f97316',
+      };
+      const glyphs: Record<'sos' | 'pickup' | 'drop', string> = {
+        sos: '🚨',
+        pickup: 'P',
+        drop: 'D',
+      };
+      const el = document.createElement('div');
+      el.style.width = type === 'sos' ? '34px' : '28px';
+      el.style.height = type === 'sos' ? '34px' : '28px';
+      el.style.borderRadius = '999px';
+      el.style.background = colors[type];
+      el.style.border = '2px solid #fff';
+      el.style.boxShadow = '0 10px 25px rgba(0,0,0,0.28)';
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.style.fontSize = type === 'sos' ? '14px' : '12px';
+      el.style.fontWeight = '800';
+      el.style.color = '#fff';
+      el.style.userSelect = 'none';
+      el.textContent = glyphs[type];
+      return el;
+    };
+
+    const initMap = async () => {
+      const olaMaps = new OlaMaps({ apiKey: MAPS_KEY });
+      const center = points[0];
+      const map = await olaMaps.init({
+        container: containerRef.current,
+        style: defaultStyleJson,
+        center: [center.lng, center.lat],
+        zoom: 14,
+        attributionControl: false,
+      });
+
+      if (cancelled) {
+        map.remove?.();
+        return;
+      }
+
+      mapRef.current = map;
+      map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), 'top-right');
+
+      points.forEach(point => {
+        const marker = new OlaMaps.Marker({ element: createMarkerElement(point.type) })
+          .setLngLat([point.lng, point.lat])
+          .addTo(map);
+        markers.push(marker);
+      });
+
+      if (points.length > 1) {
+        const lngs = points.map(p => p.lng);
+        const lats = points.map(p => p.lat);
+        map.fitBounds(
+          [
+            [Math.min(...lngs), Math.min(...lats)],
+            [Math.max(...lngs), Math.max(...lats)],
+          ],
+          { padding: 52, duration: 0 }
+        );
+      }
+    };
+
+    initMap().catch(console.error);
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [points]);
+
+  if (!MAPS_KEY) {
+    return (
+      <div className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+        Add VITE_OLA_MAPS_KEY in .env to view live SOS map.
+      </div>
+    );
+  }
+
+  if (points.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-100 p-3 text-sm text-slate-600">
+        Waiting for SOS location updates...
+      </div>
+    );
+  }
+
+  return <div ref={containerRef} className="h-64 w-full overflow-hidden rounded-xl border border-red-200" />;
+}
+
 export default function AdminSupport() {
   const [trips, setTrips] = useState<SupportTrip[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<SupportTrip | null>(null);
@@ -167,6 +305,59 @@ export default function AdminSupport() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const token = localStorage.getItem('adminToken');
+
+  const normalizeSosPayload = (data: any) => {
+    const lat = Number(data?.lat ?? data?.location?.lat ?? data?.trip?.location?.lat ?? data?.trip?.currentLocation?.lat);
+    const lng = Number(data?.lng ?? data?.location?.lng ?? data?.trip?.location?.lng ?? data?.trip?.currentLocation?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+    const tripId = data?.tripId ?? data?.trip?._id ?? data?.supportRequestId ?? `manual_sos_${Date.now()}`;
+    const trip = data?.trip;
+    const customer = trip?.customerId ?? data?.customer ?? {};
+    const driver = trip?.assignedDriver ?? data?.driver ?? null;
+
+    const fallbackTrip: SupportTrip = {
+      _id: String(tripId),
+      status: 'active',
+      supportReason: 'SOS emergency',
+      supportRequestId: data?.supportRequestId,
+      createdAt: data?.timestamp ?? new Date().toISOString(),
+      customerId: {
+        _id: String(customer?._id ?? 'unknown_customer'),
+        name: customer?.name ?? 'Customer',
+        phone: customer?.phone ?? 'Unknown',
+      },
+      assignedDriver: driver
+        ? {
+            _id: driver._id,
+            name: driver.name,
+            phone: driver.phone,
+            vehicleNumber: driver.vehicleNumber,
+            rating: driver.rating,
+            location: driver.location,
+          }
+        : null,
+      pickup: {
+        address: trip?.pickup?.address ?? 'Live SOS location',
+        coordinates: trip?.pickup?.coordinates ?? [lng, lat],
+      },
+      drop: {
+        address: trip?.drop?.address ?? 'In Progress',
+        coordinates: trip?.drop?.coordinates,
+      },
+      issueType: data?.sosType ?? 'SOS_EMERGENCY',
+      priority: 'critical',
+      isSOS: true,
+      sosLocation: {
+        lat,
+        lng,
+        updatedAt: data?.timestamp ?? new Date().toISOString(),
+        sosType: data?.sosType,
+      },
+    };
+
+    return { tripId: String(tripId), nextTrip: fallbackTrip };
+  };
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -495,6 +686,48 @@ export default function AdminSupport() {
       playAlertSound(data.isSOS);
     });
 
+    const onSosUpdate = (data: any) => {
+      const parsed = normalizeSosPayload(data);
+      if (!parsed) return;
+
+      setTrips(prev => {
+        const idx = prev.findIndex(
+          t =>
+            t._id === parsed.tripId ||
+            t.supportRequestId === data?.supportRequestId ||
+            t._id === data?.trip?._id
+        );
+
+        if (idx === -1) {
+          return [parsed.nextTrip, ...prev];
+        }
+
+        const updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          ...data?.trip,
+          issueType: data?.sosType ?? updated[idx].issueType ?? 'SOS_EMERGENCY',
+          priority: 'critical',
+          isSOS: true,
+          sosLocation: parsed.nextTrip.sosLocation,
+          pickup: {
+            ...updated[idx].pickup,
+            coordinates: updated[idx].pickup?.coordinates ?? [parsed.nextTrip.sosLocation!.lng, parsed.nextTrip.sosLocation!.lat],
+          },
+        };
+        return updated;
+      });
+
+      setFilter('sos');
+      playAlertSound(true);
+    };
+
+    newSocket.on('admin:sos_alert', onSosUpdate);
+    newSocket.on('admin:sos_update', onSosUpdate);
+    newSocket.on('sos:triggered', onSosUpdate);
+    newSocket.on('sos:location_update', onSosUpdate);
+    newSocket.on('sos:location', onSosUpdate);
+
     newSocket.on('admin:driver_ticket', (data: any) => {
       setDriverTickets(prev => [data.ticket, ...prev]);
       
@@ -528,10 +761,23 @@ export default function AdminSupport() {
         clearTimeout(typingTimeoutRef.current);
       }
       if (socketRef.current) {
+        socketRef.current.off('admin:sos_alert');
+        socketRef.current.off('admin:sos_update');
+        socketRef.current.off('sos:triggered');
+        socketRef.current.off('sos:location_update');
+        socketRef.current.off('sos:location');
         socketRef.current.disconnect();
       }
     };
   }, [token]);
+
+  useEffect(() => {
+    if (!selectedTrip) return;
+    const latest = trips.find(t => t._id === selectedTrip._id);
+    if (latest && latest !== selectedTrip) {
+      setSelectedTrip(latest);
+    }
+  }, [selectedTrip, trips]);
 
   const filteredCustomerTrips = trips.filter(trip => {
     const passesFilter = filter === 'all' ? true : filter === 'sos' ? trip.isSOS : trip.priority === filter;
@@ -984,6 +1230,47 @@ export default function AdminSupport() {
                     )}
                   </div>
                 </div>
+
+                {selectedTrip.isSOS && (
+                  <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-red-600">Live SOS</p>
+                        <h3 className="text-sm font-bold text-red-800">
+                          {selectedTrip.sosLocation?.sosType?.replace(/_/g, ' ') || 'EMERGENCY LOCATION'}
+                        </h3>
+                      </div>
+                      {selectedTrip.sosLocation && (
+                        <a
+                          href={`https://maps.olakrutrim.com/?q=${selectedTrip.sosLocation.lat},${selectedTrip.sosLocation.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                        >
+                          <MapPin className="h-3.5 w-3.5" />
+                          Open Map
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="mb-3 grid grid-cols-1 gap-2 text-sm text-red-900 md:grid-cols-2">
+                      <div className="rounded-lg border border-red-100 bg-white p-2.5">
+                        <p className="text-xs text-red-500">Latitude</p>
+                        <p className="font-mono font-semibold">{selectedTrip.sosLocation?.lat ?? '—'}</p>
+                      </div>
+                      <div className="rounded-lg border border-red-100 bg-white p-2.5">
+                        <p className="text-xs text-red-500">Longitude</p>
+                        <p className="font-mono font-semibold">{selectedTrip.sosLocation?.lng ?? '—'}</p>
+                      </div>
+                    </div>
+
+                    <SOSLiveMap
+                      location={selectedTrip.sosLocation ? { lat: selectedTrip.sosLocation.lat, lng: selectedTrip.sosLocation.lng } : undefined}
+                      pickup={selectedTrip.pickup?.coordinates}
+                      drop={selectedTrip.drop?.coordinates}
+                    />
+                  </div>
+                )}
 
                 <button
                   onClick={resolveSupport}
