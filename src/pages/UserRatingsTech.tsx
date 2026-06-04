@@ -240,7 +240,7 @@ export function TechnicalMonitoring() {
     { label: "Socket.IO Server", status: "online",  latency: "8ms",   uptime: "99.7%" },
     { label: "Firebase FCM",     status: "online",  latency: "120ms", uptime: "99.5%" },
     { label: "Razorpay Gateway", status: "online",  latency: "230ms", uptime: "99.9%" },
-    { label: "Google Maps API",  status: "online",  latency: "180ms", uptime: "99.6%" },
+    { label: "Ola Maps API",     status: "online",  latency: "180ms", uptime: "99.6%" },
   ];
 
   if (loading) return <Spinner label="Loading system data…" />;

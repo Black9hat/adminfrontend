@@ -10,6 +10,7 @@ import {
   SearchBar, Sel, Tabs, Timeline, InfoRow, SectionLabel,
   ConfirmDialog, C, Pagination, StatCard, LiveDot,
 } from "../components/ui";
+import { OlaMaps, defaultStyleJson } from "olamaps-web-sdk";
 import { toast } from "react-toastify";
 
 const PER = 20;
@@ -31,72 +32,130 @@ const TYPE_OPTS = [
 ];
 
 // ── Maps ──────────────────────────────────────────────────────────────────────
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY ?? "";
-let _ms: "idle"|"loading"|"ready" = (window as any).google?.maps ? "ready" : "idle";
-const _mq: Array<()=>void> = [];
-function loadMaps(cb:()=>void) {
-  if (!MAPS_KEY) return;
-  if (_ms==="ready") { cb(); return; }
-  _mq.push(cb);
-  if (_ms==="loading") return;
-  _ms="loading";
-  const s=document.createElement("script");
-  s.src=`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=geometry,directions`;
-  s.async=true;
-  s.onload=()=>{ _ms="ready"; _mq.forEach(f=>f()); _mq.length=0; };
-  document.head.appendChild(s);
-}
-const DARK_MAP=[
-  {elementType:"geometry",stylers:[{color:"#0f1117"}]},
-  {elementType:"labels.text.fill",stylers:[{color:"#525e7a"}]},
-  {elementType:"labels.text.stroke",stylers:[{color:"#0f1117"}]},
-  {featureType:"road",elementType:"geometry",stylers:[{color:"#1a1f2e"}]},
-  {featureType:"road",elementType:"geometry.stroke",stylers:[{color:"#12151c"}]},
-  {featureType:"road",elementType:"labels.text.fill",stylers:[{color:"#3a4560"}]},
-  {featureType:"water",elementType:"geometry",stylers:[{color:"#060810"}]},
-  {featureType:"poi",stylers:[{visibility:"off"}]},
-  {featureType:"transit",stylers:[{visibility:"off"}]},
-  {featureType:"administrative",elementType:"geometry",stylers:[{color:"#1a1f2e"}]},
-];
+const MAPS_KEY = import.meta.env.VITE_OLA_MAPS_KEY ?? "";
 function toLatLng(loc?:Trip["pickup"]):{lat:number;lng:number}|null {
   const c=loc?.coordinates;
   if (c?.length===2) return {lat:c[1],lng:c[0]};
   return null;
 }
+function createMarkerElement(color:string, glyph:string) {
+  const el = document.createElement("div");
+  el.style.width = "30px";
+  el.style.height = "30px";
+  el.style.borderRadius = "999px";
+  el.style.background = color;
+  el.style.border = "2px solid #fff";
+  el.style.boxShadow = "0 10px 25px rgba(0,0,0,0.22)";
+  el.style.display = "flex";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  el.style.fontSize = "15px";
+  el.style.cursor = "pointer";
+  el.style.userSelect = "none";
+  el.textContent = glyph;
+  return el;
+}
+
+function fitRouteBounds(map:any, pickup:{lat:number;lng:number}, drop?:{lat:number;lng:number}|null) {
+  if (!drop) {
+    map.setCenter([pickup.lng, pickup.lat]);
+    map.setZoom(14);
+    return;
+  }
+  const minLng = Math.min(pickup.lng, drop.lng);
+  const minLat = Math.min(pickup.lat, drop.lat);
+  const maxLng = Math.max(pickup.lng, drop.lng);
+  const maxLat = Math.max(pickup.lat, drop.lat);
+  map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 48, duration: 0 });
+}
+
+function buildTripPopup(trip:Trip, title:string, body:string) {
+  return `
+    <div style="font-family: Inter, Segoe UI, sans-serif; min-width: 180px; color: #0f172a;">
+      <div style="font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">${title}</div>
+      <div style="font-size: 0.9rem; font-weight: 700; margin-bottom: 6px;">Ride #${trip._id.slice(-8).toUpperCase()}</div>
+      <div style="font-size: 0.78rem; line-height: 1.45; color: #334155;">${body}</div>
+    </div>
+  `;
+}
 function RideMap({trip,height=260}:{trip:Trip;height?:number}) {
   const ref=useRef<HTMLDivElement>(null);
-  const [rdy,setRdy]=useState(_ms==="ready");
-  useEffect(()=>{ loadMaps(()=>setRdy(true)); },[]);
+  const mapRef = useRef<any>(null);
+  const pickup = useMemo(()=>toLatLng(trip.pickup),[trip.pickup]);
+  const drop = useMemo(()=>toLatLng(trip.drop),[trip.drop]);
   useEffect(()=>{
-    if (!rdy||!ref.current) return;
-    const pickup=toLatLng(trip.pickup); const drop=toLatLng(trip.drop);
+    if (!MAPS_KEY||!ref.current) return;
     if (!pickup) return;
-    try {
-      const G=(window as any).google.maps;
-      const map=new G.Map(ref.current,{
-        zoom:13,center:pickup,styles:DARK_MAP,
-        disableDefaultUI:true,zoomControl:false,
-      });
-      const mkOpts=(color:string)=>({
-        path:G.SymbolPath.CIRCLE,scale:8,
-        fillColor:color,fillOpacity:1,
-        strokeColor:"#fff",strokeWeight:2,
-      });
-      new G.Marker({position:pickup,map,title:"Pickup",icon:mkOpts(C.green)});
-      if (drop) {
-        new G.Marker({position:drop,map,title:"Drop",icon:mkOpts(C.red)});
-        const ds=new G.DirectionsService();
-        const dr=new G.DirectionsRenderer({map,suppressMarkers:true,
-          polylineOptions:{strokeColor:C.primary,strokeOpacity:0.9,strokeWeight:4}});
-        ds.route({origin:pickup,destination:drop,travelMode:G.TravelMode.DRIVING},
-          (r:any,s:any)=>{
-            if(s===G.DirectionsStatus.OK) dr.setDirections(r);
-            else new G.Polyline({path:[pickup,drop],geodesic:true,strokeColor:C.primary,strokeWeight:3,map});
-            const b=new G.LatLngBounds();b.extend(pickup);b.extend(drop);map.fitBounds(b,48);
-          });
+    let cancelled = false;
+    const markers:any[] = [];
+    const removeMap = () => {
+      markers.forEach(marker => marker.remove?.());
+      markers.length = 0;
+      if (mapRef.current) {
+        mapRef.current.remove?.();
+        mapRef.current = null;
       }
+    };
+    try {
+      const olaMaps = new OlaMaps({ apiKey: MAPS_KEY });
+      void olaMaps.init({
+        container: ref.current,
+        style: defaultStyleJson,
+        center: [pickup.lng, pickup.lat],
+        zoom: 13,
+        attributionControl: false,
+      }).then((map:any) => {
+        if (cancelled) {
+          map.remove?.();
+          return;
+        }
+        mapRef.current = map;
+        map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), "top-right");
+
+        const pickupMarker = new OlaMaps.Marker({ element: createMarkerElement(C.green, "📍") })
+          .setLngLat([pickup.lng, pickup.lat])
+          .setPopup(new OlaMaps.Popup({ offset: 18, closeButton: false, closeOnClick: false }).setHTML(
+            buildTripPopup(trip, "Pickup", trip.pickup?.address ?? `${pickup.lat.toFixed(5)}, ${pickup.lng.toFixed(5)}`)
+          ))
+          .addTo(map);
+        markers.push(pickupMarker);
+
+        if (drop) {
+          const dropMarker = new OlaMaps.Marker({ element: createMarkerElement(C.red, "🏁") })
+            .setLngLat([drop.lng, drop.lat])
+            .setPopup(new OlaMaps.Popup({ offset: 18, closeButton: false, closeOnClick: false }).setHTML(
+              buildTripPopup(trip, "Drop", trip.drop?.address ?? `${drop.lat.toFixed(5)}, ${drop.lng.toFixed(5)}`)
+            ))
+            .addTo(map);
+          markers.push(dropMarker);
+
+          const routeData = {
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: [[pickup.lng, pickup.lat], [drop.lng, drop.lat]] },
+            properties: {},
+          } as const;
+          if (map.getSource("ride-route")) {
+            (map.getSource("ride-route") as any).setData(routeData);
+          } else {
+            map.addSource("ride-route", { type: "geojson", data: routeData });
+            map.addLayer({
+              id: "ride-route-line",
+              type: "line",
+              source: "ride-route",
+              layout: { "line-cap": "round", "line-join": "round" },
+              paint: { "line-color": C.primary, "line-width": 4, "line-opacity": 0.9 },
+            });
+          }
+        }
+
+        fitRouteBounds(map, pickup, drop);
+      });
     } catch(e){console.warn(e);}
-  },[rdy,trip]);
+    return () => {
+      cancelled = true;
+      removeMap();
+    };
+  },[trip,height,pickup?.lat,pickup?.lng,drop?.lat,drop?.lng]);
 
   if (!MAPS_KEY) return (
     <div style={{
@@ -105,7 +164,7 @@ function RideMap({trip,height=260}:{trip:Trip;height?:number}) {
     }}>
       <span style={{fontSize:"1.4rem"}}>🗺️</span>
       <span style={{color:C.muted,fontSize:"0.71rem",fontFamily:"'JetBrains Mono',monospace"}}>
-        Set VITE_GOOGLE_MAPS_KEY to enable map
+        Set VITE_OLA_MAPS_KEY to enable map
       </span>
       <div style={{fontSize:"0.69rem",color:C.muted,textAlign:"center",maxWidth:280,marginTop:2}}>
         📍 {trip.pickup?.address?.slice(0,50)}<br/>
@@ -113,7 +172,7 @@ function RideMap({trip,height=260}:{trip:Trip;height?:number}) {
       </div>
     </div>
   );
-  return <div ref={ref} style={{width:"100%",height,borderRadius:9,background:C.surface2}}/>;
+  return <div ref={ref} style={{width:"100%",height,borderRadius:9,background:C.surface2,overflow:"hidden"}}/>;
 }
 
 // ── Quick stat chip ───────────────────────────────────────────────────────────

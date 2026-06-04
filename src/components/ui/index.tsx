@@ -781,7 +781,7 @@ export const Timeline: React.FC<{
 // MAP PLACEHOLDER
 // ─────────────────────────────────────────────────────────────────────────────
 export const MapPlaceholder: React.FC<{ label?:string; height?:number }> = ({
-  label="Add VITE_GOOGLE_MAPS_KEY to .env to enable maps",
+  label="Add VITE_OLA_MAPS_KEY to .env to enable maps",
   height=400,
 }) => {
   ensureCSS();

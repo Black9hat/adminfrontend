@@ -141,9 +141,9 @@ const Modal: React.FC<{ trip: Trip; onClose: () => void; onAction: (t: "complete
               </div>
             </div>
             {pLat && dLat && (
-              <a href={`https://www.google.com/maps/dir/?api=1&origin=${pLat},${pLng}&destination=${dLat},${dLng}`} target="_blank" rel="noreferrer"
+              <a href={`https://maps.olakrutrim.com/?q=${pLat},${pLng}&destination=${dLat},${dLng}`} target="_blank" rel="noreferrer"
                 className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-700 transition-colors">
-                📍 Open in Google Maps →
+                📍 Open in Ola Maps →
               </a>
             )}
           </div>

@@ -896,7 +896,7 @@ export default function MoneyFlow() {
             {icon:"☁️",bg:"rgba(34,197,94,0.1)", name:"MongoDB Atlas",   desc:"M0 free → M10 paid",    cost:"FREE*",       free:true },
             {icon:"🚂",bg:"rgba(99,102,241,0.1)",name:"Railway/Render",  desc:"Backend server hosting", cost:"₹400–₹1,700",free:false},
             {icon:"💳",bg:"rgba(245,158,11,0.1)",name:"Razorpay UPI",    desc:"2% per transaction",    cost:"2% per txn",  free:false},
-            {icon:"🗺️",bg:"rgba(59,130,246,0.1)",name:"Google Maps",     desc:"$200 free = ~40k calls", cost:"FREE*",       free:true },
+            {icon:"🗺️",bg:"rgba(59,130,246,0.1)",name:"Ola Maps",        desc:"API key based routing + tiles", cost:"FREE*",       free:true },
             {icon:"🔔",bg:"rgba(239,68,68,0.1)", name:"Firebase FCM",    desc:"Push notifications",    cost:"FREE",        free:true },
             {icon:"📱",bg:"rgba(168,85,247,0.1)",name:"Play + App Store",desc:"$25 once / ₹8.3k/yr",   cost:"₹2k–₹8.3k", free:false},
           ].map(t=>(

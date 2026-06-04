@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE 3 — GPS & Location Monitoring
 // ─────────────────────────────────────────────────────────────────────────────
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { RefreshCw, MapPin, Navigation, AlertTriangle } from "lucide-react";
 import { useTrips, useDrivers, useMutation } from "../hooks";
 import {
@@ -9,16 +9,10 @@ import {
   PageHeader, SearchBar, StatCard, SectionLabel, InfoRow, C, Tabs,
 } from "../components/ui";
 import { toast } from "react-toastify";
-import {
-  GoogleMap,
-  useJsApiLoader,
-  Marker,
-  InfoWindow,
-  Polyline,
-} from "@react-google-maps/api";
+import { OlaMaps, defaultStyleJson } from "olamaps-web-sdk";
 
-// ── Google Maps API key from .env ─────────────────────────────────────────────
-const MAPS_KEY = import.meta.env.VITE_GOOGLE_MAPS_KEY ?? "";
+// ── Ola Maps API key from .env ────────────────────────────────────────────────
+const MAPS_KEY = import.meta.env.VITE_OLA_MAPS_KEY ?? "";
 
 // ── Map dark style matching admin panel ───────────────────────────────────────
 const DARK_STYLE = [
@@ -57,12 +51,8 @@ interface LiveMapProps {
 }
 
 function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, height = 500 }: LiveMapProps) {
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: MAPS_KEY,
-    id: "goindia-map",
-  });
-
-  const [activeMarker, setActiveMarker] = useState<string | null>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const mapRef = React.useRef<any>(null);
 
   const center = useMemo(() => {
     if (focusDriver?.currentLocation?.coordinates) {
@@ -99,6 +89,160 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
     return path;
   }, [focusRide]);
 
+  const createMarkerElement = (color: string, glyph: string) => {
+    const el = document.createElement("div");
+    el.style.width = "30px";
+    el.style.height = "30px";
+    el.style.borderRadius = "999px";
+    el.style.background = color;
+    el.style.border = "2px solid #fff";
+    el.style.boxShadow = "0 10px 25px rgba(0,0,0,0.22)";
+    el.style.display = "flex";
+    el.style.alignItems = "center";
+    el.style.justifyContent = "center";
+    el.style.fontSize = "14px";
+    el.style.cursor = "pointer";
+    el.style.userSelect = "none";
+    el.textContent = glyph;
+    return el;
+  };
+
+  const buildPopup = (title: string, lines: string[]) => `
+    <div style="font-family: Inter, Segoe UI, sans-serif; min-width: 150px; color: #0f172a;">
+      <div style="font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">${title}</div>
+      ${lines.map(line => `<div style=\"font-size: 0.8rem; line-height: 1.45; color: #334155;\">${line}</div>`).join("")}
+    </div>
+  `;
+
+  useEffect(() => {
+    if (!MAPS_KEY || !containerRef.current) return;
+
+    let cancelled = false;
+    const markers: any[] = [];
+
+    const cleanup = () => {
+      markers.forEach(marker => marker.remove?.());
+      markers.length = 0;
+      if (mapRef.current) {
+        mapRef.current.remove?.();
+        mapRef.current = null;
+      }
+    };
+
+    const initMap = async () => {
+      const olaMaps = new OlaMaps({ apiKey: MAPS_KEY });
+      const map = await olaMaps.init({
+        container: containerRef.current,
+        style: defaultStyleJson,
+        center: [center.lng, center.lat],
+        zoom,
+        attributionControl: false,
+      });
+
+      if (cancelled) {
+        map.remove?.();
+        return;
+      }
+
+      mapRef.current = map;
+      map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), "top-right");
+
+      const addMarker = (id: string, lng: number, lat: number, element: HTMLElement, popupHtml: string) => {
+        const marker = new OlaMaps.Marker({ element })
+          .setLngLat([lng, lat])
+          .setPopup(new OlaMaps.Popup({ offset: 18, closeButton: false, closeOnClick: false }).setHTML(popupHtml))
+          .addTo(map);
+        markers.push(marker);
+        return marker;
+      };
+
+      drivers.forEach((d) => {
+        if (!d.currentLocation?.coordinates) return;
+        const [lng, lat] = d.currentLocation.coordinates;
+        const id = "driver-" + d._id;
+        addMarker(
+          id,
+          lng,
+          lat,
+          createMarkerElement("#6366f1", "🏍️"),
+          buildPopup("Driver", [
+            `<strong>${d.name}</strong>`,
+            `📱 ${d.phone ?? "—"}`,
+            `🚗 ${d.vehicleType ?? "—"} · ${d.vehicleNumber ?? "—"}`,
+            `<span style=\"color:#22c55e\">● Online</span>`,
+          ])
+        );
+      });
+
+      activeRides.forEach((t) => {
+        if (t.pickup?.location?.coordinates) {
+          const [lng, lat] = t.pickup.location.coordinates;
+          addMarker(
+            "pickup-" + t._id,
+            lng,
+            lat,
+            createMarkerElement("#22c55e", "📍"),
+            buildPopup("Pickup", [
+              `${t.pickup?.address ?? "—"}`,
+              `Ride #${t._id.slice(-8).toUpperCase()}`,
+            ])
+          );
+        }
+        if (t.drop?.location?.coordinates) {
+          const [lng, lat] = t.drop.location.coordinates;
+          addMarker(
+            "drop-" + t._id,
+            lng,
+            lat,
+            createMarkerElement("#ef4444", "🏁"),
+            buildPopup("Drop", [
+              `${t.drop?.address ?? "—"}`,
+              `Ride #${t._id.slice(-8).toUpperCase()}`,
+            ])
+          );
+        }
+      });
+
+      if (routePath.length === 2) {
+        const routeData = {
+          type: "Feature",
+          geometry: { type: "LineString", coordinates: routePath.map(point => [point.lng, point.lat]) },
+          properties: {},
+        } as const;
+        if (map.getSource("focused-ride-route")) {
+          (map.getSource("focused-ride-route") as any).setData(routeData);
+        } else {
+          map.addSource("focused-ride-route", { type: "geojson", data: routeData });
+          map.addLayer({
+            id: "focused-ride-route-line",
+            type: "line",
+            source: "focused-ride-route",
+            layout: { "line-cap": "round", "line-join": "round" },
+            paint: { "line-color": "#6366f1", "line-width": 3, "line-opacity": 0.85 },
+          });
+        }
+      }
+
+      if (focusDriver?.currentLocation?.coordinates) {
+        map.setCenter([center.lng, center.lat]);
+        map.setZoom(zoom);
+      } else if (routePath.length === 2) {
+        const [start, end] = routePath;
+        map.fitBounds([[Math.min(start.lng, end.lng), Math.min(start.lat, end.lat)], [Math.max(start.lng, end.lng), Math.max(start.lat, end.lat)]], { padding: 48, duration: 0 });
+      } else {
+        map.setCenter([center.lng, center.lat]);
+        map.setZoom(zoom);
+      }
+    };
+
+    initMap().catch(console.warn);
+
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [activeRides, center.lat, center.lng, focusDriver, focusRide, routePath, zoom]);
+
   if (!MAPS_KEY) {
     return (
       <div style={{
@@ -108,150 +252,15 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
       }}>
         <span style={{ fontSize: "2rem" }}>🗺️</span>
         <div style={{ color: "#4a5568", fontSize: "0.82rem", fontFamily: "monospace", textAlign: "center" }}>
-          Add <span style={{ color: "#6366f1" }}>VITE_GOOGLE_MAPS_KEY</span> to your <span style={{ color: "#f59e0b" }}>.env</span> file<br />
+          Add <span style={{ color: "#6366f1" }}>VITE_OLA_MAPS_KEY</span> to your <span style={{ color: "#f59e0b" }}>.env</span> file<br />
           then redeploy to enable live map
         </div>
       </div>
     );
   }
 
-  if (loadError) {
-    return (
-      <div style={{ height, background: "#0e1015", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: "#f87171", fontSize: "0.85rem" }}>⚠️ Maps failed to load — check your API key &amp; billing</div>
-      </div>
-    );
-  }
-
-  if (!isLoaded) {
-    return (
-      <div style={{ height, background: "#0e1015", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: "#6b7280", fontSize: "0.82rem", fontFamily: "monospace" }}>Loading map…</div>
-      </div>
-    );
-  }
-
   return (
-    <GoogleMap
-      mapContainerStyle={{ width: "100%", height, borderRadius: 12 }}
-      center={center}
-      zoom={zoom}
-      options={MAP_OPTIONS}
-    >
-      {/* ── Driver markers ───────────────────────────────────────────────── */}
-      {drivers.map(d => {
-        if (!d.currentLocation?.coordinates) return null;
-        const [lng, lat] = d.currentLocation.coordinates;
-        const id = "driver-" + d._id;
-        return (
-          <Marker
-            key={id}
-            position={{ lat, lng }}
-            title={d.name}
-            icon={{
-              url: "data:image/svg+xml;utf8," + encodeURIComponent(
-                `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-                  <circle cx="16" cy="16" r="14" fill="#6366f1" stroke="#fff" stroke-width="2"/>
-                  <text x="16" y="21" text-anchor="middle" font-size="14">🏍️</text>
-                </svg>`
-              ),
-              scaledSize: new window.google.maps.Size(36, 36),
-              anchor: new window.google.maps.Point(18, 18),
-            }}
-            onClick={() => setActiveMarker(activeMarker === id ? null : id)}
-          >
-            {activeMarker === id && (
-              <InfoWindow onCloseClick={() => setActiveMarker(null)}>
-                <div style={{ fontFamily: "sans-serif", fontSize: 13, minWidth: 140 }}>
-                  <strong>{d.name}</strong><br />
-                  📱 {d.phone}<br />
-                  🚗 {d.vehicleType} · {d.vehicleNumber}<br />
-                  <span style={{ color: "#22c55e" }}>● Online</span>
-                </div>
-              </InfoWindow>
-            )}
-          </Marker>
-        );
-      })}
-
-      {/* ── Active ride pickup/drop markers ──────────────────────────────── */}
-      {activeRides.map(t => {
-        const results = [];
-        if (t.pickup?.location?.coordinates) {
-          const [lng, lat] = t.pickup.location.coordinates;
-          const id = "pickup-" + t._id;
-          results.push(
-            <Marker
-              key={id}
-              position={{ lat, lng }}
-              title={"Pickup: " + (t.pickup?.address ?? "")}
-              icon={{
-                url: "data:image/svg+xml;utf8," + encodeURIComponent(
-                  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-                    <circle cx="14" cy="14" r="12" fill="#22c55e" stroke="#fff" stroke-width="2"/>
-                    <text x="14" y="19" text-anchor="middle" font-size="12">📍</text>
-                  </svg>`
-                ),
-                scaledSize: new window.google.maps.Size(30, 30),
-                anchor: new window.google.maps.Point(15, 15),
-              }}
-              onClick={() => setActiveMarker(activeMarker === id ? null : id)}
-            >
-              {activeMarker === id && (
-                <InfoWindow onCloseClick={() => setActiveMarker(null)}>
-                  <div style={{ fontFamily: "sans-serif", fontSize: 13 }}>
-                    <strong>Pickup</strong><br />
-                    {t.pickup?.address ?? "—"}<br />
-                    Ride #{t._id.slice(-8).toUpperCase()}
-                  </div>
-                </InfoWindow>
-              )}
-            </Marker>
-          );
-        }
-        if (t.drop?.location?.coordinates) {
-          const [lng, lat] = t.drop.location.coordinates;
-          const id = "drop-" + t._id;
-          results.push(
-            <Marker
-              key={id}
-              position={{ lat, lng }}
-              title={"Drop: " + (t.drop?.address ?? "")}
-              icon={{
-                url: "data:image/svg+xml;utf8," + encodeURIComponent(
-                  `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
-                    <circle cx="14" cy="14" r="12" fill="#ef4444" stroke="#fff" stroke-width="2"/>
-                    <text x="14" y="19" text-anchor="middle" font-size="12">🏁</text>
-                  </svg>`
-                ),
-                scaledSize: new window.google.maps.Size(30, 30),
-                anchor: new window.google.maps.Point(15, 15),
-              }}
-              onClick={() => setActiveMarker(activeMarker === id ? null : id)}
-            >
-              {activeMarker === id && (
-                <InfoWindow onCloseClick={() => setActiveMarker(null)}>
-                  <div style={{ fontFamily: "sans-serif", fontSize: 13 }}>
-                    <strong>Drop</strong><br />
-                    {t.drop?.address ?? "—"}<br />
-                    Ride #{t._id.slice(-8).toUpperCase()}
-                  </div>
-                </InfoWindow>
-              )}
-            </Marker>
-          );
-        }
-        return results;
-      })}
-
-      {/* ── Route polyline for focused ride ──────────────────────────────── */}
-      {routePath.length === 2 && (
-        <Polyline
-          path={routePath}
-          options={{ strokeColor: "#6366f1", strokeWeight: 3, strokeOpacity: 0.85 }}
-        />
-      )}
-    </GoogleMap>
+    <div ref={containerRef} style={{ width: "100%", height, borderRadius: 12, overflow: "hidden", background: "#0e1015" }} />
   );
 }
 
@@ -309,7 +318,7 @@ export function GPSMonitoring() {
                 <TD muted style={{ fontSize: "0.75rem" }}>{ride ? "#" + ride._id.slice(-8).toUpperCase() : "—"}</TD>
                 <TD>
                   {coords && (
-                    <a href={"https://maps.google.com/?q=" + coords[1] + "," + coords[0]} target="_blank" rel="noreferrer" style={{ color: C.primary, fontSize: "0.75rem", fontWeight: 700 }}>Open Maps ↗</a>
+                    <a href={"https://maps.olakrutrim.com/?q=" + coords[1] + "," + coords[0]} target="_blank" rel="noreferrer" style={{ color: C.primary, fontSize: "0.75rem", fontWeight: 700 }}>Open Ola Maps ↗</a>
                   )}
                 </TD>
               </TR>
