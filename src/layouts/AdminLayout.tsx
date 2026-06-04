@@ -73,6 +73,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { path: "/safety",  label: "Complaints",      icon: <Shield size={14} />     },
       { path: "/support", label: "Admin Support",   icon: <HelpCircle size={14} /> },
+      { path: "/sos-monitoring", label: "SOS Monitoring", icon: <Activity size={14} /> },
       { path: "/fraud",   label: "Fraud Detection", icon: <Search size={14} />     },
     ],
   },

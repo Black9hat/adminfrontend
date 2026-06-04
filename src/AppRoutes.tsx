@@ -42,6 +42,7 @@ const TimingSlotIncentivesManagement = lazy(() => import("./pages/TimingSlotInce
 const PlanManagement               = lazy(() => import("./pages/PlanManagement")); // ✅ NEW
 const CommissionSettings     = lazy(() => import("./pages/CommissionSettings")); // ✅ NEW
 const AdminSupport           = lazy(() => import("./pages/AdminSupport"));
+const SOSMonitoring          = lazy(() => import("./pages/SOSmonitoring"));
 const NotificationPage       = lazy(() => import("./pages/Notifications"));
 const HelpManagement         = lazy(() => import("./pages/Helpmanagement"));
 const DocumentsPage          = lazy(() => import("./pages/Documents"));
@@ -100,6 +101,7 @@ export default function AppRoutes() {
           {/* Safety & Trust */}
           <Route path="/safety"             element={<SafetyComplaints />} />
           <Route path="/support"            element={<AdminSupport />} />
+          <Route path="/sos-monitoring"     element={<SOSMonitoring />} />
           <Route path="/fraud"              element={<FraudDetection />} />
 
           {/* System */}
