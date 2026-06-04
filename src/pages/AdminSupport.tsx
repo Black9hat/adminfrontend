@@ -31,8 +31,17 @@ import {
   Search
 } from 'lucide-react';
 
-const API_BASE = 'https://ghumobackend.onrender.com';
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:5000' : 'https://ghumobackend.onrender.com');
 const MAPS_KEY = import.meta.env.VITE_OLA_MAPS_KEY ?? '';
+const SOS_ENDPOINT_CANDIDATES = [
+  '/api/sos/admin/active',
+  '/api/sos/active',
+  '/api/admin/sos/active',
+  '/api/sos/alerts',
+  '/api/sos/list',
+];
 const getAuthToken = () => localStorage.getItem("adminToken") || "";
 
 // ✅ FIX: Removed Cache-Control and Pragma headers.
@@ -304,6 +313,7 @@ export default function AdminSupport() {
   const socketRef = useRef<ReturnType<typeof io> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sosEndpointRef = useRef<string | null>(null);
   const token = localStorage.getItem('adminToken');
 
   const normalizeSosPayload = (data: any) => {
@@ -357,6 +367,84 @@ export default function AdminSupport() {
     };
 
     return { tripId: String(tripId), nextTrip: fallbackTrip };
+  };
+
+  const mergeSosIntoTrips = (parsed: { tripId: string; nextTrip: SupportTrip }, rawData?: any) => {
+    setTrips(prev => {
+      const idx = prev.findIndex(
+        t =>
+          t._id === parsed.tripId ||
+          t.supportRequestId === rawData?.supportRequestId ||
+          t._id === rawData?.trip?._id
+      );
+
+      if (idx === -1) {
+        return [parsed.nextTrip, ...prev];
+      }
+
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        ...rawData?.trip,
+        issueType: rawData?.sosType ?? updated[idx].issueType ?? 'SOS_EMERGENCY',
+        priority: 'critical',
+        isSOS: true,
+        sosLocation: parsed.nextTrip.sosLocation,
+        pickup: {
+          ...updated[idx].pickup,
+          coordinates: updated[idx].pickup?.coordinates ?? [parsed.nextTrip.sosLocation!.lng, parsed.nextTrip.sosLocation!.lat],
+        },
+      };
+      return updated;
+    });
+  };
+
+  const fetchSosFallback = async () => {
+    const endpoints = sosEndpointRef.current ? [sosEndpointRef.current] : SOS_ENDPOINT_CANDIDATES;
+
+    for (const endpoint of endpoints) {
+      try {
+        const res = await axios.get(`${API_BASE}${endpoint}?t=${Date.now()}`, {
+          headers: getApiHeaders(),
+          validateStatus: (status) => status === 200 || status === 401 || status === 403 || status === 404,
+        });
+
+        if (res.status !== 200) continue;
+
+        const payload = res.data;
+        const items = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.alerts)
+          ? payload.alerts
+          : Array.isArray(payload?.sosRequests)
+          ? payload.sosRequests
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : [];
+
+        if (!Array.isArray(items)) continue;
+
+        sosEndpointRef.current = endpoint;
+
+        items.forEach((item: any) => {
+          const parsed = normalizeSosPayload({
+            ...item,
+            tripId: item?.tripId ?? item?.trip?._id ?? item?._id,
+            lat: item?.lat ?? item?.location?.lat ?? item?.coordinates?.[1],
+            lng: item?.lng ?? item?.location?.lng ?? item?.coordinates?.[0],
+            sosType: item?.sosType ?? item?.type ?? 'SOS_EMERGENCY',
+            timestamp: item?.timestamp ?? item?.updatedAt ?? item?.createdAt,
+          });
+          if (parsed) {
+            mergeSosIntoTrips(parsed, item);
+          }
+        });
+
+        break;
+      } catch {
+        // Keep trying fallback endpoints silently.
+      }
+    }
   };
 
   const scrollToBottom = () => {
@@ -690,33 +778,7 @@ export default function AdminSupport() {
       const parsed = normalizeSosPayload(data);
       if (!parsed) return;
 
-      setTrips(prev => {
-        const idx = prev.findIndex(
-          t =>
-            t._id === parsed.tripId ||
-            t.supportRequestId === data?.supportRequestId ||
-            t._id === data?.trip?._id
-        );
-
-        if (idx === -1) {
-          return [parsed.nextTrip, ...prev];
-        }
-
-        const updated = [...prev];
-        updated[idx] = {
-          ...updated[idx],
-          ...data?.trip,
-          issueType: data?.sosType ?? updated[idx].issueType ?? 'SOS_EMERGENCY',
-          priority: 'critical',
-          isSOS: true,
-          sosLocation: parsed.nextTrip.sosLocation,
-          pickup: {
-            ...updated[idx].pickup,
-            coordinates: updated[idx].pickup?.coordinates ?? [parsed.nextTrip.sosLocation!.lng, parsed.nextTrip.sosLocation!.lat],
-          },
-        };
-        return updated;
-      });
+      mergeSosIntoTrips(parsed, data);
 
       setFilter('sos');
       playAlertSound(true);
@@ -751,6 +813,11 @@ export default function AdminSupport() {
 
     fetchSupportTrips();
     fetchDriverTickets();
+    fetchSosFallback();
+
+    const sosInterval = setInterval(() => {
+      fetchSosFallback();
+    }, 8000);
 
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -760,6 +827,7 @@ export default function AdminSupport() {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
+      clearInterval(sosInterval);
       if (socketRef.current) {
         socketRef.current.off('admin:sos_alert');
         socketRef.current.off('admin:sos_update');
