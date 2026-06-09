@@ -1,9 +1,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MODULE 3 — GPS & Location Monitoring
-// Live driver tracking: 1s polling, animated marker moves, real road polylines
+// Real-time driver tracking via Socket.IO (admin:driverLocationUpdate)
+// with 5s HTTP polling as fallback when socket is disconnected.
 // ─────────────────────────────────────────────────────────────────────────────
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { useTrips, useDrivers, useMutation } from "../hooks";
 import {
   Badge, Btn, Card, Table, TR, TD, Modal, Spinner, PageError,
@@ -11,10 +12,22 @@ import {
 } from "../components/ui";
 import { toast } from "react-toastify";
 import { OlaMaps, defaultStyleJson } from "olamaps-web-sdk";
+import {
+  onDriverLocationUpdate,
+  offDriverLocationUpdate,
+  onDriverStatusChange,
+  offDriverStatusChange,
+  isAdminSocketConnected,
+  getAdminSocket,
+  type AdminDriverLocation,
+  type AdminDriverStatusChange,
+} from "../services/adminSocket";
 
 const MAPS_KEY       = import.meta.env.VITE_OLA_MAPS_KEY ?? "";
 const DEFAULT_CENTER = { lat: 17.3850, lng: 78.4867 };
-const POLL_INTERVAL  = 1000; // 1 second live updates
+
+// Fallback HTTP poll interval — only used when socket is disconnected
+const FALLBACK_POLL_MS = 5000;
 
 type LatLngPoint = { lat: number; lng: number };
 
@@ -49,7 +62,13 @@ function getEta(driver: any, admin?: LatLngPoint | null) {
   return { km, min, label: `${min} min (${km.toFixed(1)} km away)` };
 }
 
-// ── Polyline decoder (Google encoded polyline format) ──────────────────────
+function getEtaFromLatLng(lat: number, lng: number, admin: LatLngPoint) {
+  const km  = distanceKm({ lat, lng }, admin);
+  const min = Math.max(1, Math.ceil((km / 25) * 60));
+  return { km, min, label: `${min} min (${km.toFixed(1)} km away)` };
+}
+
+// ── Polyline decoder ───────────────────────────────────────────────────────
 function decodePolyline(encoded: string): [number, number][] {
   const pts: [number, number][] = [];
   let i = 0, lat = 0, lng = 0;
@@ -60,19 +79,17 @@ function decodePolyline(encoded: string): [number, number][] {
     s = 0; r = 0;
     do { b = encoded.charCodeAt(i++) - 63; r |= (b & 0x1f) << s; s += 5; } while (b >= 0x20);
     lng += r & 1 ? ~(r >> 1) : r >> 1;
-    pts.push([lng / 1e5, lat / 1e5]); // GeoJSON [lng, lat]
+    pts.push([lng / 1e5, lat / 1e5]);
   }
   return pts;
 }
 
-// ── Fetch real road route from Ola Directions API ─────────────────────────
 async function fetchRoadRoute(
   origin: LatLngPoint,
   dest: LatLngPoint,
   key: string
 ): Promise<[number, number][] | null> {
   if (!key || !origin.lat || !dest.lat) return null;
-  // Validate coords are real (not 0,0)
   if (Math.abs(origin.lat) < 0.01 && Math.abs(origin.lng) < 0.01) return null;
   if (Math.abs(dest.lat)   < 0.01 && Math.abs(dest.lng)   < 0.01) return null;
   try {
@@ -99,7 +116,6 @@ async function fetchRoadRoute(
   }
 }
 
-// ── Marker element factory ─────────────────────────────────────────────────
 function makeMarkerEl(color: string, emoji: string, size = 36): HTMLDivElement {
   const el = document.createElement("div");
   Object.assign(el.style, {
@@ -115,6 +131,7 @@ function makeMarkerEl(color: string, emoji: string, size = 36): HTMLDivElement {
     fontSize:       `${Math.round(size * 0.48)}px`,
     cursor:         "pointer",
     userSelect:     "none",
+    // CSS transition — the map SDK moves the DOM element, this smooths it
     transition:     "transform 0.15s ease",
   });
   el.textContent = emoji;
@@ -152,16 +169,17 @@ function popupHtml(title: string, lines: string[]) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LiveMap component
-// Strategy: init map once, then imperatively update markers + routes on prop changes.
-// This avoids full destroy/recreate on every 1s poll tick.
+// Receives `livePositions` — a map of driverId → {lat, lng} that updates
+// in real time from the socket. Falls back to driver.location from REST.
 // ─────────────────────────────────────────────────────────────────────────────
 interface LiveMapProps {
-  drivers?:     any[];
-  activeRides?: any[];
-  focusDriver?: any;
-  focusRide?:   any;
-  height?:      number;
-  adminCenter?: LatLngPoint | null;
+  drivers?:      any[];
+  activeRides?:  any[];
+  focusDriver?:  any;
+  focusRide?:    any;
+  height?:       number;
+  adminCenter?:  LatLngPoint | null;
+  livePositions?: Record<string, { lat: number; lng: number }>;
 }
 
 function LiveMap({
@@ -171,25 +189,34 @@ function LiveMap({
   focusRide,
   height      = 500,
   adminCenter,
+  livePositions = {},
 }: LiveMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef       = useRef<any>(null);
-  const mapReadyRef  = useRef(false);          // true once "load" event fired
-  const markersRef   = useRef<Map<string, any>>(new Map()); // id → OlaMaps Marker
-  const routeCacheRef= useRef<Map<string, [number,number][]>>(new Map()); // key → coords
+  const mapReadyRef  = useRef(false);
+  const markersRef   = useRef<Map<string, any>>(new Map());
+  const routeCacheRef= useRef<Map<string, [number,number][]>>(new Map());
 
-  // ── compute stable props we'll pass into imperative updater ───────────────
-  const adminCenterRef = useRef(adminCenter);
-  useEffect(() => { adminCenterRef.current = adminCenter; }, [adminCenter]);
+  const adminCenterRef   = useRef(adminCenter);
+  const livePositionsRef = useRef(livePositions);
+  useEffect(() => { adminCenterRef.current = adminCenter; },    [adminCenter]);
+  useEffect(() => { livePositionsRef.current = livePositions; }, [livePositions]);
 
-  // ── Wait for map load, then draw everything ───────────────────────────────
+  // ── Resolve the best coords for a driver ─────────────────────────────────
+  // Priority: live socket position → REST location field
+  function resolveDriverCoords(d: any): [number, number] | null {
+    const live = livePositionsRef.current[d._id];
+    if (live) return [live.lng, live.lat];
+    return getDriverCoords(d);
+  }
+
   const drawAll = useCallback(async () => {
     const map = mapRef.current;
     if (!map || !mapReadyRef.current) return;
 
     const admin = adminCenterRef.current;
 
-    // ── 1. Admin center marker ─────────────────────────────────────────────
+    // 1. Admin center marker
     if (admin) {
       const id = "__admin__";
       if (!markersRef.current.has(id)) {
@@ -211,13 +238,15 @@ function LiveMap({
       }
     }
 
-    // ── 2. Driver markers — create once, then animate position ────────────
+    // 2. Driver markers — create once, animate on every update
     for (const d of drivers) {
-      const coords = getDriverCoords(d);
+      const coords = resolveDriverCoords(d);
       if (!coords) continue;
       const [dLng, dLat] = coords;
       const vType = d.vehicleType || "bike";
-      const eta   = getEta(d, adminCenterRef.current);
+      const eta   = admin
+        ? getEtaFromLatLng(dLat, dLng, admin)
+        : getEta(d, admin);
       const hasRide = activeRides.some(
         (t: any) => t.assignedDriver?._id === d._id || t.assignedDriver === d._id
       );
@@ -235,7 +264,6 @@ function LiveMap({
       ].filter(Boolean));
 
       if (!markersRef.current.has(d._id)) {
-        // Create marker fresh
         const el = makeMarkerEl(vehicleColor(vType), vehicleEmoji(vType));
         const m = new OlaMaps.Marker({ element: el })
           .setLngLat([dLng, dLat])
@@ -246,21 +274,18 @@ function LiveMap({
           .addTo(map);
         markersRef.current.set(d._id, m);
       } else {
-        // Smoothly animate to new position (CSS transition on the element handles this)
         const m = markersRef.current.get(d._id)!;
         m.setLngLat([dLng, dLat]);
-        // Update popup content so ETA stays fresh
         m.getPopup()?.setHTML(popupContent);
       }
     }
 
-    // Remove markers for drivers that went offline
+    // Remove markers for offline drivers
     const activeIds = new Set(drivers.map((d: any) => d._id));
     markersRef.current.forEach((m, id) => {
       if (id !== "__admin__" && id !== "__pickup__" && id !== "__drop__" && !activeIds.has(id)) {
         m.remove();
         markersRef.current.delete(id);
-        // Also clean up their route source/layer
         const srcId = `driver-route-${id}`;
         if (map.getSource(srcId)) {
           map.removeLayer(`${srcId}-border`);
@@ -271,7 +296,7 @@ function LiveMap({
       }
     });
 
-    // ── 3. Active ride markers (pickup + drop) ─────────────────────────────
+    // 3. Active ride markers
     if (focusRide) {
       if (focusRide.pickup?.location?.coordinates) {
         const [lng, lat] = focusRide.pickup.location.coordinates;
@@ -303,39 +328,32 @@ function LiveMap({
       }
     }
 
-    // ── 4. Road polylines ─────────────────────────────────────────────────
-    // Each driver gets a real-road route from admin → driver position.
-    // Routes are cached by driverId so we only re-fetch when position changes
-    // more than ~50m (avoids hammering the API on every 1s tick).
+    // 4. Road polylines (admin → driver)
     if (admin) {
       for (const d of drivers) {
-        const coords = getDriverCoords(d);
+        const coords = resolveDriverCoords(d);
         if (!coords) continue;
         const [dLng, dLat] = coords;
         const hasRide = activeRides.some(
           (t: any) => t.assignedDriver?._id === d._id || t.assignedDriver === d._id
         );
-        const lineColor  = hasRide ? "#ef4444" : "#22c55e";
-        const lineWidth  = hasRide ? 9 : 7;
-        const lineOpacity= hasRide ? 0.95 : 0.75;
-
+        const lineColor   = hasRide ? "#ef4444" : "#22c55e";
+        const lineWidth   = hasRide ? 9 : 7;
+        const lineOpacity = hasRide ? 0.95 : 0.75;
         const srcId    = `driver-route-${d._id}`;
         const borderId = `${srcId}-border`;
         const lineId   = `${srcId}-line`;
 
-        // Cache key includes rounded coords so we re-route only on meaningful moves
         const cacheKey = `${d._id}__${dLat.toFixed(4)}_${dLng.toFixed(4)}`;
         let roadCoords = routeCacheRef.current.get(cacheKey);
 
         if (!roadCoords) {
-          // Fetch real road route; fall back to straight line
           const fetched = await fetchRoadRoute(
             { lat: admin.lat, lng: admin.lng },
-            { lat: dLat,      lng: dLng      },
+            { lat: dLat, lng: dLng },
             MAPS_KEY
           );
           roadCoords = fetched ?? [[admin.lng, admin.lat], [dLng, dLat]];
-          // Evict old cache entries for this driver (different coords)
           routeCacheRef.current.forEach((_, k) => {
             if (k.startsWith(`${d._id}__`)) routeCacheRef.current.delete(k);
           });
@@ -349,60 +367,44 @@ function LiveMap({
         };
 
         if (map.getSource(srcId)) {
-          // Update existing source data (moves the line as driver moves)
           (map.getSource(srcId) as any).setData(geojson);
-          // Update style in case ride status changed
           if (map.getLayer(lineId)) {
             map.setPaintProperty(lineId, "line-color",   lineColor);
             map.setPaintProperty(lineId, "line-width",   lineWidth);
             map.setPaintProperty(lineId, "line-opacity", lineOpacity);
           }
         } else {
-          // Add source + two layers (white border + colored line)
           map.addSource(srcId, { type: "geojson", data: geojson });
-
-          // White border layer — makes line pop on any map background
           map.addLayer({
-            id:     borderId,
-            type:   "line",
-            source: srcId,
+            id: borderId, type: "line", source: srcId,
             layout: { "line-cap": "round", "line-join": "round" },
-            paint:  { "line-color": "#ffffff", "line-width": lineWidth + 4, "line-opacity": 0.6 },
+            paint: { "line-color": "#ffffff", "line-width": lineWidth + 4, "line-opacity": 0.6 },
           });
-
-          // Colored main line
           map.addLayer({
-            id:     lineId,
-            type:   "line",
-            source: srcId,
+            id: lineId, type: "line", source: srcId,
             layout: { "line-cap": "round", "line-join": "round" },
-            paint:  { "line-color": lineColor, "line-width": lineWidth, "line-opacity": lineOpacity },
+            paint: { "line-color": lineColor, "line-width": lineWidth, "line-opacity": lineOpacity },
           });
         }
       }
     }
 
-    // ── 5. Focused-ride route ──────────────────────────────────────────────
+    // 5. Focused-ride route
     if (focusRide?.pickup?.location?.coordinates && focusRide?.drop?.location?.coordinates) {
       const [pLng, pLat] = focusRide.pickup.location.coordinates;
       const [dLng, dLat] = focusRide.drop.location.coordinates;
-      const origin = { lat: pLat, lng: pLng };
-      const dest   = { lat: dLat, lng: dLng };
-
       const cacheKey = `ride__${pLat.toFixed(4)}_${pLng.toFixed(4)}__${dLat.toFixed(4)}_${dLng.toFixed(4)}`;
       let roadCoords = routeCacheRef.current.get(cacheKey);
       if (!roadCoords) {
-        const fetched = await fetchRoadRoute(origin, dest, MAPS_KEY);
+        const fetched = await fetchRoadRoute({ lat: pLat, lng: pLng }, { lat: dLat, lng: dLng }, MAPS_KEY);
         roadCoords = fetched ?? [[pLng, pLat], [dLng, dLat]];
         routeCacheRef.current.set(cacheKey, roadCoords);
       }
-
       const geojson = {
         type: "Feature" as const,
         geometry: { type: "LineString" as const, coordinates: roadCoords },
         properties: {},
       };
-
       if (map.getSource("focused-ride-route")) {
         (map.getSource("focused-ride-route") as any).setData(geojson);
       } else {
@@ -410,18 +412,18 @@ function LiveMap({
         map.addLayer({
           id: "focused-ride-border", type: "line", source: "focused-ride-route",
           layout: { "line-cap": "round", "line-join": "round" },
-          paint:  { "line-color": "#ffffff", "line-width": 10, "line-opacity": 0.6 },
+          paint: { "line-color": "#ffffff", "line-width": 10, "line-opacity": 0.6 },
         });
         map.addLayer({
           id: "focused-ride-route-line", type: "line", source: "focused-ride-route",
           layout: { "line-cap": "round", "line-join": "round" },
-          paint:  { "line-color": "#6366f1", "line-width": 7, "line-opacity": 0.9 },
+          paint: { "line-color": "#6366f1", "line-width": 7, "line-opacity": 0.9 },
         });
       }
     }
-  }, [drivers, activeRides, focusDriver, focusRide]);
+  }, [drivers, activeRides, focusDriver, focusRide, livePositions]);
 
-  // ── Init map ONCE ─────────────────────────────────────────────────────────
+  // Init map ONCE
   useEffect(() => {
     if (!MAPS_KEY || !containerRef.current) return;
     let cancelled = false;
@@ -442,9 +444,9 @@ function LiveMap({
     (async () => {
       const olaMaps = new OlaMaps({ apiKey: MAPS_KEY });
       const map = await olaMaps.init({
-        container:         containerRef.current!,
-        style:             defaultStyleJson,
-        center:            [initCenter.lng, initCenter.lat],
+        container:          containerRef.current!,
+        style:              defaultStyleJson,
+        center:             [initCenter.lng, initCenter.lat],
         zoom,
         attributionControl: false,
       });
@@ -453,11 +455,10 @@ function LiveMap({
       mapRef.current = map;
       map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), "top-right");
 
-      // Wait for map tiles to load before adding sources/layers
       map.on("load", () => {
         if (cancelled) return;
         mapReadyRef.current = true;
-        drawAll(); // initial draw
+        drawAll();
       });
     })().catch(console.warn);
 
@@ -471,9 +472,9 @@ function LiveMap({
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // ← init only once
+  }, []);
 
-  // ── Re-draw whenever drivers/rides/adminCenter change (1s poll ticks here) ─
+  // Re-draw on any prop change (socket tick or REST poll)
   useEffect(() => {
     drawAll();
   }, [drawAll]);
@@ -503,24 +504,28 @@ function LiveMap({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GPSMonitoring page — polls useDrivers every 1s so map stays live
+// GPSMonitoring page
 // ─────────────────────────────────────────────────────────────────────────────
 export function GPSMonitoring() {
   const { trips, loading, error, refetch } = useTrips();
   const { drivers, refetch: refetchDrivers } = useDrivers();
-  const [sel, setSel]                         = useState<any>(null);
-  const [adminCenter, setAdminCenter]         = useState<LatLngPoint | null>(null);
+  const [sel, setSel]         = useState<any>(null);
+  const [adminCenter, setAdminCenter] = useState<LatLngPoint | null>(null);
 
-  // ── Get admin/laptop location once ────────────────────────────────────────
+  // ── Real-time socket state ─────────────────────────────────────────────
+  // livePositions: driverId → latest {lat, lng} from socket
+  const [livePositions, setLivePositions] = useState<Record<string, { lat: number; lng: number }>>({});
+  const [socketConnected, setSocketConnected] = useState(false);
+  const lastSocketPingRef = useRef<number>(0);
+
+  // ── Get admin/device location ──────────────────────────────────────────
   useEffect(() => {
     if (!navigator.geolocation) { setAdminCenter(DEFAULT_CENTER); return; }
-    // Initial fix
     navigator.geolocation.getCurrentPosition(
       (p) => setAdminCenter({ lat: p.coords.latitude, lng: p.coords.longitude }),
       ()  => setAdminCenter(DEFAULT_CENTER),
       { enableHighAccuracy: true, timeout: 10000 }
     );
-    // Watch for laptop/device movement too
     const watchId = navigator.geolocation.watchPosition(
       (p) => setAdminCenter({ lat: p.coords.latitude, lng: p.coords.longitude }),
       () => {},
@@ -529,15 +534,69 @@ export function GPSMonitoring() {
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  // ── Poll driver locations every 1 second ──────────────────────────────────
+  // ── Socket: subscribe to real-time driver locations ─────────────────────
   useEffect(() => {
-    const id = setInterval(() => { refetchDrivers(); }, POLL_INTERVAL);
+    // Initialise admin socket connection (singleton — safe to call multiple times)
+    getAdminSocket();
+
+    const handleLocation = (data: AdminDriverLocation) => {
+      lastSocketPingRef.current = Date.now();
+      setSocketConnected(true);
+      setLivePositions(prev => ({
+        ...prev,
+        [data.driverId]: { lat: data.lat, lng: data.lng },
+      }));
+    };
+
+    const handleStatusChange = (data: AdminDriverStatusChange) => {
+      if (!data.isOnline) {
+        // Remove position when driver goes offline
+        setLivePositions(prev => {
+          const next = { ...prev };
+          delete next[data.driverId];
+          return next;
+        });
+      }
+      // Trigger a REST refetch so table data (name, vehicle, etc) stays fresh
+      refetchDrivers();
+    };
+
+    onDriverLocationUpdate(handleLocation);
+    onDriverStatusChange(handleStatusChange);
+
+    // Poll socket connection status every 3s to show the indicator
+    const statusInterval = setInterval(() => {
+      const isConnected = isAdminSocketConnected();
+      setSocketConnected(isConnected);
+    }, 3000);
+
+    return () => {
+      offDriverLocationUpdate(handleLocation);
+      offDriverStatusChange(handleStatusChange);
+      clearInterval(statusInterval);
+    };
+  }, [refetchDrivers]);
+
+  // ── Fallback HTTP poll — only fires when socket hasn't pinged recently ──
+  // If socket is alive we get updates every ~5s automatically from drivers.
+  // This fallback covers: admin panel opened before any driver moves,
+  // socket disconnect, or driver app in background (no location updates).
+  useEffect(() => {
+    const id = setInterval(() => {
+      const socketAge = Date.now() - lastSocketPingRef.current;
+      // If socket last pinged > 10s ago, do a REST poll to stay fresh
+      if (socketAge > 10_000) {
+        refetchDrivers();
+      }
+    }, FALLBACK_POLL_MS);
     return () => clearInterval(id);
   }, [refetchDrivers]);
 
   const activeRides   = useMemo(() => trips.filter((t: any)   => t.status === "ride_started"), [trips]);
   const activeDrivers = useMemo(() => drivers.filter((d: any) => d.isOnline),                  [drivers]);
-  const withLocation  = useMemo(() => activeDrivers.filter((d: any) => !!getDriverCoords(d)),  [activeDrivers]);
+  const withLocation  = useMemo(() => activeDrivers.filter(
+    (d: any) => !!getDriverCoords(d) || !!livePositions[d._id]
+  ), [activeDrivers, livePositions]);
 
   if (loading) return <Spinner label="Loading GPS data…" />;
   if (error)   return <PageError message={error} onRetry={refetch} />;
@@ -549,9 +608,25 @@ export function GPSMonitoring() {
         icon="🗺️"
         sub={`${withLocation.length} drivers broadcasting · ${activeRides.length} rides in progress`}
         actions={
-          <Btn icon={<RefreshCw size={14} />} variant="ghost" onClick={() => { refetch(); refetchDrivers(); }}>
-            Refresh
-          </Btn>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {/* Socket connection indicator */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "4px 10px", borderRadius: 8,
+              background: socketConnected ? "rgba(34,197,94,0.12)" : "rgba(107,114,128,0.12)",
+              border: `1px solid ${socketConnected ? "#22c55e44" : "#6b728044"}`,
+              fontSize: "0.72rem", color: socketConnected ? "#22c55e" : "#9ca3af",
+              fontWeight: 600,
+            }}>
+              {socketConnected
+                ? <><Wifi size={12} /> Live</>
+                : <><WifiOff size={12} /> Polling</>
+              }
+            </div>
+            <Btn icon={<RefreshCw size={14} />} variant="ghost" onClick={() => { refetch(); refetchDrivers(); }}>
+              Refresh
+            </Btn>
+          </div>
         }
       />
 
@@ -593,6 +668,7 @@ export function GPSMonitoring() {
             drivers={withLocation}
             activeRides={activeRides}
             adminCenter={adminCenter}
+            livePositions={livePositions}
             height={520}
           />
           {withLocation.length === 0 && (
@@ -614,12 +690,32 @@ export function GPSMonitoring() {
           emptyMessage="No drivers online"
         >
           {activeDrivers.map((d: any) => {
-            const ride   = activeRides.find((t: any) => t.assignedDriver?._id === d._id || t.assignedDriver === d._id);
-            const coords = getDriverCoords(d);
-            const eta    = getEta(d, adminCenter);
+            const ride      = activeRides.find((t: any) => t.assignedDriver?._id === d._id || t.assignedDriver === d._id);
+            const livePos   = livePositions[d._id];
+            const restCoord = getDriverCoords(d);
+            const coords    = livePos ? [livePos.lng, livePos.lat] as [number, number] : restCoord;
+            const isLive    = !!livePos;
+
+            // ETA from best coords
+            const eta = adminCenter && coords
+              ? getEtaFromLatLng(coords[1], coords[0], adminCenter)
+              : getEta(d, adminCenter);
+
             return (
               <TR key={d._id} onClick={() => setSel({ type: "driver", data: d })}>
-                <TD><div style={{ fontWeight: 600 }}>{d.name}</div><div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{d.phone}</div></TD>
+                <TD>
+                  <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                    {d.name}
+                    {isLive && (
+                      <span style={{
+                        fontSize: "0.6rem", padding: "1px 5px", borderRadius: 4,
+                        background: "rgba(34,197,94,0.15)", color: "#22c55e",
+                        fontWeight: 700, letterSpacing: "0.04em",
+                      }}>LIVE</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{d.phone}</div>
+                </TD>
                 <TD mono muted style={{ fontSize: "0.8rem" }}>{d.vehicleNumber ?? "—"}</TD>
                 <TD>
                   <span style={{ fontSize: "0.78rem", padding: "2px 8px", borderRadius: 6, background: "#1e2330", color: C.text }}>
@@ -628,7 +724,12 @@ export function GPSMonitoring() {
                 </TD>
                 <TD><Badge status="online" /></TD>
                 <TD mono muted style={{ fontSize: "0.7rem" }}>
-                  {coords ? `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}` : <span style={{ color: C.red }}>No signal</span>}
+                  {coords
+                    ? <span style={{ color: isLive ? "#22c55e" : C.muted }}>
+                        {coords[1].toFixed(5)}, {coords[0].toFixed(5)}
+                      </span>
+                    : <span style={{ color: C.red }}>No signal</span>
+                  }
                 </TD>
                 <TD mono style={{ fontSize: "0.75rem", color: eta ? C.amber : C.muted, fontWeight: eta ? 700 : 400 }}>
                   {eta ? eta.label : "—"}
@@ -681,16 +782,28 @@ export function GPSMonitoring() {
         width={560}
       >
         {sel?.type === "driver" && sel.data && (() => {
-          const coords = getDriverCoords(sel.data);
-          const eta    = getEta(sel.data, adminCenter);
+          const livePos   = livePositions[sel.data._id];
+          const restCoord = getDriverCoords(sel.data);
+          const coords    = livePos ? [livePos.lng, livePos.lat] as [number, number] : restCoord;
+          const eta       = adminCenter && coords
+            ? getEtaFromLatLng(coords[1], coords[0], adminCenter)
+            : getEta(sel.data, adminCenter);
+          // Pass live positions into modal map too
           return (
             <>
-              <LiveMap focusDriver={sel.data} drivers={[sel.data]} adminCenter={adminCenter} height={280} />
+              <LiveMap
+                focusDriver={sel.data}
+                drivers={[sel.data]}
+                adminCenter={adminCenter}
+                livePositions={livePositions}
+                height={280}
+              />
               <div style={{ marginTop: "0.875rem" }}>
-                <InfoRow label="Driver"      value={sel.data.name} />
-                <InfoRow label="Phone"       value={sel.data.phone} />
-                <InfoRow label="Vehicle"     value={`${sel.data.vehicleType ?? "—"} · ${sel.data.vehicleNumber ?? "—"}`} />
-                <InfoRow label="Coordinates" value={coords ? `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}` : "No signal"} />
+                <InfoRow label="Driver"       value={sel.data.name} />
+                <InfoRow label="Phone"        value={sel.data.phone} />
+                <InfoRow label="Vehicle"      value={`${sel.data.vehicleType ?? "—"} · ${sel.data.vehicleNumber ?? "—"}`} />
+                <InfoRow label="Coordinates"  value={coords ? `${coords[1].toFixed(6)}, ${coords[0].toFixed(6)}` : "No signal"} />
+                <InfoRow label="Location Source" value={livePos ? "🟢 Live socket" : "🟡 Last known (REST)"} />
                 <InfoRow label="ETA to Admin" value={eta ? eta.label : "Unavailable"} color={eta ? C.amber : C.muted} />
               </div>
             </>
@@ -698,259 +811,18 @@ export function GPSMonitoring() {
         })()}
         {sel?.type === "ride" && sel.data && (
           <>
-            <LiveMap focusRide={sel.data} activeRides={[sel.data]} adminCenter={adminCenter} height={280} />
+            <LiveMap
+              focusRide={sel.data}
+              activeRides={[sel.data]}
+              adminCenter={adminCenter}
+              livePositions={livePositions}
+              height={280}
+            />
             <div style={{ marginTop: "0.875rem" }}>
               <InfoRow label="Pickup" value={sel.data.pickup?.address ?? "—"} />
               <InfoRow label="Drop"   value={sel.data.drop?.address ?? "—"} />
               <InfoRow label="Driver" value={sel.data.assignedDriver?.name ?? "—"} />
               <InfoRow label="Fare"   value={`₹${(sel.data.finalFare ?? sel.data.fare ?? 0).toFixed(2)}`} color={C.amber} />
-            </div>
-          </>
-        )}
-      </Modal>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MODULE 4 — Safety & Complaint Management
-// ─────────────────────────────────────────────────────────────────────────────
-export function SafetyComplaints() {
-  const { trips, loading, error, refetch } = useTrips();
-  const { mutate, loading: acting } = useMutation();
-
-  const [tab, setTab]      = useState("all");
-  const [q, setQ]          = useState("");
-  const [sel, setSel]      = useState<any>(null);
-  const [confirm, setCf]   = useState<null | "block" | "suspend">(null);
-  const [selDriver, setSD] = useState<any>(null);
-
-  const supportTrips = useMemo(() => trips.filter((t: any) => t.supportRequested), [trips]);
-
-  const filtered = useMemo(() => {
-    let base = supportTrips;
-    if (tab === "pending")  base = base.filter((t: any) => t.status !== "completed" && t.status !== "cancelled");
-    if (tab === "resolved") base = base.filter((t: any) => t.status === "completed");
-    if (q) {
-      const ql = q.toLowerCase();
-      base = base.filter((t: any) =>
-        [t._id, t.customerId?.name, t.customerId?.phone, t.supportReason].some((v: any) =>
-          v?.toLowerCase?.().includes(ql)
-        )
-      );
-    }
-    return base.sort((a: any, b: any) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [supportTrips, tab, q]);
-
-  const doBlock = async () => {
-    if (!selDriver) return;
-    const { ok } = await mutate("put", "/admin/driver/block/" + selDriver._id);
-    if (ok) { toast.success("Driver blocked"); setCf(null); refetch(); }
-    else toast.error("Block failed");
-  };
-
-  const doSuspend = async () => {
-    if (!selDriver) return;
-    const { ok } = await mutate("put", "/admin/driver/suspend/" + selDriver._id);
-    if (ok) { toast.success("Driver suspended"); setCf(null); }
-    else toast.warning("Suspend endpoint not configured — add /admin/driver/suspend/:id");
-  };
-
-  if (loading) return <Spinner label="Loading complaints…" />;
-  if (error)   return <PageError message={error} onRetry={refetch} />;
-
-  return (
-    <div style={{ minHeight: "100vh", background: C.bg, padding: "1.75rem", fontFamily: "'Syne','Segoe UI',sans-serif" }}>
-      <PageHeader title="Safety & Complaints" icon="🛡️"
-        sub={supportTrips.length + " support requests from trip data"}
-        actions={<Btn icon={<RefreshCw size={14}/>} variant="ghost" onClick={refetch}>Refresh</Btn>}
-      />
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Total Complaints" value={supportTrips.length} icon="🆘" color={C.red} />
-        <StatCard label="Open"             value={supportTrips.filter((t: any) => !["completed","cancelled"].includes(t.status)).length} icon="🔴" color={C.amber} />
-        <StatCard label="Emergency"        value={supportTrips.filter((t: any) => t.supportReason?.toLowerCase().includes("emergency")).length} icon="🚨" color={C.red} />
-      </div>
-
-      <Tabs tabs={[
-        { key: "all",      label: "All",      count: supportTrips.length },
-        { key: "pending",  label: "Open" },
-        { key: "resolved", label: "Resolved" },
-      ]} active={tab} onChange={(k) => setTab(k)} />
-
-      <div style={{ display: "flex", gap: 10, margin: "1rem 0" }}>
-        <SearchBar value={q} onChange={setQ} placeholder="Search complaint ID, user name, reason…" />
-      </div>
-
-      <Card>
-        <Table headers={["Trip ID","Customer","Driver","Reason","Status","Date","Actions"]} isEmpty={filtered.length === 0} emptyMessage="No complaints found">
-          {filtered.map((t: any) => (
-            <TR key={t._id} onClick={() => setSel(t)}>
-              <TD mono muted>#{t._id.slice(-8).toUpperCase()}</TD>
-              <TD><div style={{ fontWeight: 600 }}>{t.customerId?.name ?? "—"}</div><div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{t.customerId?.phone}</div></TD>
-              <TD><div style={{ fontWeight: 600 }}>{t.assignedDriver?.name ?? "—"}</div></TD>
-              <TD muted style={{ fontSize: "0.78rem", maxWidth: 180 }}>{t.supportReason ?? "No reason given"}</TD>
-              <TD><Badge status={["completed","cancelled"].includes(t.status) ? "resolved" : "pending"} /></TD>
-              <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(t.createdAt).toLocaleDateString("en-IN")}</TD>
-              <TD>
-                <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-                  {t.assignedDriver && (
-                    <>
-                      <Btn size="sm" variant="danger"  onClick={() => { setSD(t.assignedDriver); setCf("block"); }}>Block</Btn>
-                      <Btn size="sm" variant="warning" onClick={() => { setSD(t.assignedDriver); setCf("suspend"); }}>Suspend</Btn>
-                    </>
-                  )}
-                </div>
-              </TD>
-            </TR>
-          ))}
-        </Table>
-      </Card>
-
-      <Modal open={!!sel && !confirm} onClose={() => setSel(null)} title={"Complaint — #" + (sel?._id?.slice(-8).toUpperCase() ?? "")}>
-        {sel && (
-          <>
-            <InfoRow label="Customer"    value={sel.customerId?.name + " · " + sel.customerId?.phone} />
-            <InfoRow label="Driver"      value={sel.assignedDriver?.name + " · " + sel.assignedDriver?.phone} />
-            <InfoRow label="Reason"      value={sel.supportReason ?? "Not specified"} />
-            <InfoRow label="Ride Status" value={<Badge status={sel.status} />} />
-            <InfoRow label="Created"     value={new Date(sel.createdAt).toLocaleString("en-IN")} />
-            {sel.assignedDriver && (
-              <div style={{ display: "flex", gap: 8, marginTop: "1rem" }}>
-                <Btn variant="danger"  onClick={() => { setSD(sel.assignedDriver); setCf("block"); }}>Block Driver</Btn>
-                <Btn variant="warning" onClick={() => { setSD(sel.assignedDriver); setCf("suspend"); }}>Suspend Driver</Btn>
-              </div>
-            )}
-          </>
-        )}
-      </Modal>
-
-      <Modal open={confirm === "block"} onClose={() => setCf(null)} title="Block Driver" width={380}>
-        <p style={{ color: C.muted, marginBottom: "1rem", fontSize: "0.88rem" }}>Block <strong style={{ color: C.text }}>{selDriver?.name}</strong>? They won't be able to accept rides.</p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Btn variant="ghost"  onClick={() => setCf(null)}>Cancel</Btn>
-          <Btn variant="danger" onClick={doBlock} loading={acting}>Block Driver</Btn>
-        </div>
-      </Modal>
-
-      <Modal open={confirm === "suspend"} onClose={() => setCf(null)} title="Suspend Driver" width={380}>
-        <p style={{ color: C.muted, marginBottom: "1rem", fontSize: "0.88rem" }}>Suspend <strong style={{ color: C.text }}>{selDriver?.name}</strong> temporarily?</p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Btn variant="ghost"   onClick={() => setCf(null)}>Cancel</Btn>
-          <Btn variant="warning" onClick={doSuspend} loading={acting}>Suspend</Btn>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MODULE 5 — Parcel Management
-// ─────────────────────────────────────────────────────────────────────────────
-export function ParcelManagement() {
-  const { trips, loading, error, refetch } = useTrips();
-  const { mutate, loading: acting } = useMutation();
-  const [q, setQ]     = useState("");
-  const [tab, setTab] = useState("all");
-  const [sel, setSel] = useState<any>(null);
-
-  const parcels = useMemo(() => trips.filter((t: any) => t.type === "parcel"), [trips]);
-
-  const filtered = useMemo(() => {
-    let base = parcels;
-    if (tab === "active")    base = base.filter((t: any) => !["completed","cancelled"].includes(t.status));
-    if (tab === "delivered") base = base.filter((t: any) => t.status === "completed");
-    if (tab === "cancelled") base = base.filter((t: any) => t.status === "cancelled");
-    if (q) {
-      const ql = q.toLowerCase();
-      base = base.filter((t: any) =>
-        [t._id, t.customerId?.name, t.parcelDetails?.senderName, t.parcelDetails?.receiverName, t.parcelDetails?.receiverPhone]
-          .some((v: any) => v?.toLowerCase?.().includes(ql))
-      );
-    }
-    return base.sort((a: any, b: any) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [parcels, tab, q]);
-
-  const markLost = async (id: string) => {
-    const { ok } = await mutate("put", "/admin/trip/" + id + "/cancel");
-    if (ok) { toast.success("Marked as lost/cancelled"); refetch(); }
-  };
-
-  if (loading) return <Spinner label="Loading parcels…" />;
-  if (error)   return <PageError message={error} onRetry={refetch} />;
-
-  return (
-    <div style={{ minHeight: "100vh", background: C.bg, padding: "1.75rem", fontFamily: "'Syne','Segoe UI',sans-serif" }}>
-      <PageHeader title="Parcel Management" icon="📦"
-        sub={parcels.length + " parcel bookings"}
-        actions={<Btn icon={<RefreshCw size={14}/>} variant="ghost" onClick={refetch}>Refresh</Btn>}
-      />
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.875rem", marginBottom: "1.5rem" }}>
-        <StatCard label="Total Parcels" value={parcels.length}                                                 icon="📦" color={C.amber} />
-        <StatCard label="In Transit"    value={parcels.filter((t: any) => t.status === "ride_started").length} icon="🚚" color={C.cyan}  />
-        <StatCard label="Delivered"     value={parcels.filter((t: any) => t.status === "completed").length}    icon="✅" color={C.green} />
-        <StatCard label="Cancelled"     value={parcels.filter((t: any) => t.status === "cancelled").length}    icon="❌" color={C.red}   />
-      </div>
-
-      <Tabs tabs={[
-        { key: "all",       label: "All",       count: parcels.length },
-        { key: "active",    label: "In Transit" },
-        { key: "delivered", label: "Delivered"  },
-        { key: "cancelled", label: "Cancelled"  },
-      ]} active={tab} onChange={setTab} />
-
-      <div style={{ display: "flex", gap: 10, margin: "1rem 0" }}>
-        <SearchBar value={q} onChange={setQ} placeholder="Search parcel ID, sender, receiver…" />
-      </div>
-
-      <Card>
-        <Table headers={["Parcel ID","Sender","Receiver","Driver","Weight","Status","OTP","Date","Actions"]} isEmpty={filtered.length === 0} emptyMessage="No parcels found">
-          {filtered.map((t: any) => (
-            <TR key={t._id} onClick={() => setSel(t)}>
-              <TD mono muted>#{t._id.slice(-8).toUpperCase()}</TD>
-              <TD><div style={{ fontWeight: 600 }}>{t.parcelDetails?.senderName ?? t.customerId?.name ?? "—"}</div></TD>
-              <TD><div style={{ fontWeight: 600 }}>{t.parcelDetails?.receiverName ?? "—"}</div><div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{t.parcelDetails?.receiverPhone}</div></TD>
-              <TD muted style={{ fontSize: "0.8rem" }}>{t.assignedDriver?.name ?? "Unassigned"}</TD>
-              <TD mono muted style={{ fontSize: "0.8rem" }}>{t.parcelDetails?.weight ? t.parcelDetails.weight + " kg" : "—"}</TD>
-              <TD><Badge status={t.status} /></TD>
-              <TD mono style={{ fontSize: "0.8rem", color: t.otp ? C.amber : C.muted }}>{t.otp ?? "—"}</TD>
-              <TD mono muted style={{ fontSize: "0.7rem" }}>{new Date(t.createdAt).toLocaleDateString("en-IN")}</TD>
-              <TD>
-                {!["completed","cancelled"].includes(t.status) && (
-                  <Btn size="sm" variant="danger" loading={acting} onClick={() => markLost(t._id)}>Mark Lost</Btn>
-                )}
-              </TD>
-            </TR>
-          ))}
-        </Table>
-      </Card>
-
-      <Modal open={!!sel} onClose={() => setSel(null)} title={"Parcel #" + (sel?._id?.slice(-8).toUpperCase() ?? "")} width={520}>
-        {sel && (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.875rem" }}>
-              <div style={{ background: "#0e1015", borderRadius: 10, padding: "0.875rem" }}>
-                <SectionLabel>Sender</SectionLabel>
-                <div style={{ fontWeight: 700 }}>{sel.parcelDetails?.senderName ?? sel.customerId?.name}</div>
-                <div style={{ color: C.muted, fontFamily: "monospace", fontSize: "0.75rem" }}>{sel.customerId?.phone}</div>
-              </div>
-              <div style={{ background: "#0e1015", borderRadius: 10, padding: "0.875rem" }}>
-                <SectionLabel>Receiver</SectionLabel>
-                <div style={{ fontWeight: 700 }}>{sel.parcelDetails?.receiverName ?? "—"}</div>
-                <div style={{ color: C.muted, fontFamily: "monospace", fontSize: "0.75rem" }}>{sel.parcelDetails?.receiverPhone}</div>
-              </div>
-            </div>
-            <InfoRow label="Status"  value={<Badge status={sel.status} />} />
-            <InfoRow label="Driver"  value={sel.assignedDriver?.name ?? "—"} />
-            <InfoRow label="OTP"     value={sel.otp ?? "—"} color={C.amber} />
-            <InfoRow label="Weight"  value={sel.parcelDetails?.weight ? sel.parcelDetails.weight + " kg" : "—"} />
-            <InfoRow label="Pickup"  value={sel.pickup?.address ?? "—"} />
-            <InfoRow label="Drop"    value={sel.drop?.address ?? "—"} />
-            <InfoRow label="Fare"    value={"₹" + (sel.finalFare ?? sel.fare ?? 0).toFixed(2)} color={C.amber} />
-            <InfoRow label="Created" value={new Date(sel.createdAt).toLocaleString("en-IN")} />
-            <div style={{ marginTop: "0.875rem", padding: "0.875rem", background: "#0e1015", borderRadius: 10, textAlign: "center", color: C.muted, fontSize: "0.8rem" }}>
-              📷 Photo proof — requires driver app upload feature
             </div>
           </>
         )}
