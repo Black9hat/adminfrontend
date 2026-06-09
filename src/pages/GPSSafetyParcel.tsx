@@ -14,32 +14,8 @@ import { OlaMaps, defaultStyleJson } from "olamaps-web-sdk";
 // ── Ola Maps API key from .env ────────────────────────────────────────────────
 const MAPS_KEY = import.meta.env.VITE_OLA_MAPS_KEY ?? "";
 
-// ── Map dark style matching admin panel ───────────────────────────────────────
-const DARK_STYLE = [
-  { elementType: "geometry",        stylers: [{ color: "#0e1015" }] },
-  { elementType: "labels.text.fill",stylers: [{ color: "#6b7280" }] },
-  { elementType: "labels.text.stroke",stylers:[{ color: "#0e1015" }] },
-  { featureType: "road",            elementType: "geometry",       stylers: [{ color: "#1e2330" }] },
-  { featureType: "road",            elementType: "geometry.stroke",stylers: [{ color: "#13161e" }] },
-  { featureType: "road",            elementType: "labels.text.fill",stylers:[{ color: "#4a5568" }] },
-  { featureType: "water",           elementType: "geometry",       stylers: [{ color: "#080a0f" }] },
-  { featureType: "water",           elementType: "labels.text.fill",stylers:[{ color: "#374151" }] },
-  { featureType: "poi",             stylers: [{ visibility: "off" }] },
-  { featureType: "transit",         stylers: [{ visibility: "off" }] },
-  { featureType: "administrative",  elementType: "geometry",       stylers: [{ color: "#1e2330" }] },
-];
-
-const MAP_OPTIONS = {
-  styles: DARK_STYLE,
-  disableDefaultUI: false,
-  zoomControl: true,
-  mapTypeControl: false,
-  streetViewControl: false,
-  fullscreenControl: true,
-};
-
-// ── Default center: India ──────────────────────────────────────────────────────
-const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
+// ── Default center: Hyderabad ─────────────────────────────────────────────────
+const DEFAULT_CENTER = { lat: 17.3850, lng: 78.4867 };
 
 // ── Reusable map container ────────────────────────────────────────────────────
 interface LiveMapProps {
@@ -50,29 +26,43 @@ interface LiveMapProps {
   height?: number;
 }
 
+// ── Helper: extract [lng, lat] from a driver object
+// Backend stores as `location.coordinates` (GeoJSON [lng, lat])
+function getDriverCoords(driver: any): [number, number] | null {
+  // Primary: location.coordinates (set by socket updateDriverStatus & HTTP locationController)
+  if (driver?.location?.coordinates?.length === 2) {
+    return driver.location.coordinates as [number, number];
+  }
+  // Fallback: currentLocation.coordinates (some older admin API shapes)
+  if (driver?.currentLocation?.coordinates?.length === 2) {
+    return driver.currentLocation.coordinates as [number, number];
+  }
+  return null;
+}
+
 function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, height = 500 }: LiveMapProps) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const mapRef = React.useRef<any>(null);
 
   const center = useMemo(() => {
-    if (focusDriver?.currentLocation?.coordinates) {
-      const [lng, lat] = focusDriver.currentLocation.coordinates;
-      return { lat, lng };
+    if (focusDriver) {
+      const c = getDriverCoords(focusDriver);
+      if (c) return { lat: c[1], lng: c[0] };
     }
     if (focusRide?.pickup?.location?.coordinates) {
       const [lng, lat] = focusRide.pickup.location.coordinates;
       return { lat, lng };
     }
     // Center on first online driver with location
-    const first = drivers.find(d => d.currentLocation?.coordinates);
+    const first = drivers.find(d => getDriverCoords(d));
     if (first) {
-      const [lng, lat] = first.currentLocation.coordinates;
-      return { lat, lng };
+      const c = getDriverCoords(first)!;
+      return { lat: c[1], lng: c[0] };
     }
     return DEFAULT_CENTER;
   }, [drivers, focusDriver, focusRide]);
 
-  const zoom = focusDriver || focusRide ? 14 : 11;
+  const zoom = focusDriver || focusRide ? 14 : 12;
 
   // Route polyline for focused ride
   const routePath = useMemo(() => {
@@ -91,26 +81,50 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
 
   const createMarkerElement = (color: string, glyph: string) => {
     const el = document.createElement("div");
-    el.style.width = "30px";
-    el.style.height = "30px";
+    el.style.width = "32px";
+    el.style.height = "32px";
     el.style.borderRadius = "999px";
     el.style.background = color;
-    el.style.border = "2px solid #fff";
-    el.style.boxShadow = "0 10px 25px rgba(0,0,0,0.22)";
+    el.style.border = "2.5px solid #fff";
+    el.style.boxShadow = "0 4px 16px rgba(0,0,0,0.35)";
     el.style.display = "flex";
     el.style.alignItems = "center";
     el.style.justifyContent = "center";
-    el.style.fontSize = "14px";
+    el.style.fontSize = "15px";
     el.style.cursor = "pointer";
     el.style.userSelect = "none";
     el.textContent = glyph;
     return el;
   };
 
+  // Vehicle type → emoji
+  const vehicleEmoji = (type: string) => {
+    switch ((type || "").toLowerCase()) {
+      case "bike":    return "🏍️";
+      case "auto":    return "🛺";
+      case "car":     return "🚗";
+      case "premium": return "🚙";
+      case "xl":      return "🚐";
+      default:        return "🚘";
+    }
+  };
+
+  // Vehicle type → marker color
+  const vehicleColor = (type: string) => {
+    switch ((type || "").toLowerCase()) {
+      case "bike":    return "#6366f1"; // indigo
+      case "auto":    return "#f59e0b"; // amber
+      case "car":     return "#22c55e"; // green
+      case "premium": return "#8b5cf6"; // purple
+      case "xl":      return "#06b6d4"; // cyan
+      default:        return "#6366f1";
+    }
+  };
+
   const buildPopup = (title: string, lines: string[]) => `
-    <div style="font-family: Inter, Segoe UI, sans-serif; min-width: 150px; color: #0f172a;">
+    <div style="font-family: Inter, Segoe UI, sans-serif; min-width: 160px; color: #0f172a;">
       <div style="font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">${title}</div>
-      ${lines.map(line => `<div style=\"font-size: 0.8rem; line-height: 1.45; color: #334155;\">${line}</div>`).join("")}
+      ${lines.map(line => `<div style="font-size: 0.8rem; line-height: 1.5; color: #334155;">${line}</div>`).join("")}
     </div>
   `;
 
@@ -139,15 +153,12 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
         attributionControl: false,
       });
 
-      if (cancelled) {
-        map.remove?.();
-        return;
-      }
-
+      if (cancelled) { map.remove?.(); return; }
       mapRef.current = map;
+
       map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), "top-right");
 
-      const addMarker = (id: string, lng: number, lat: number, element: HTMLElement, popupHtml: string) => {
+      const addMarker = (lng: number, lat: number, element: HTMLElement, popupHtml: string) => {
         const marker = new OlaMaps.Marker({ element })
           .setLngLat([lng, lat])
           .setPopup(new OlaMaps.Popup({ offset: 18, closeButton: false, closeOnClick: false }).setHTML(popupHtml))
@@ -156,31 +167,29 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
         return marker;
       };
 
+      // ── Driver markers ──────────────────────────────────────────────────────
       drivers.forEach((d) => {
-        if (!d.currentLocation?.coordinates) return;
-        const [lng, lat] = d.currentLocation.coordinates;
-        const id = "driver-" + d._id;
+        const coords = getDriverCoords(d);
+        if (!coords) return;
+        const [lng, lat] = coords;
+        const vType = d.vehicleType || "bike";
         addMarker(
-          id,
-          lng,
-          lat,
-          createMarkerElement("#6366f1", "🏍️"),
-          buildPopup("Driver", [
-            `<strong>${d.name}</strong>`,
+          lng, lat,
+          createMarkerElement(vehicleColor(vType), vehicleEmoji(vType)),
+          buildPopup("Driver · " + vType.toUpperCase(), [
+            `<strong>${d.name || "—"}</strong>`,
             `📱 ${d.phone ?? "—"}`,
-            `🚗 ${d.vehicleType ?? "—"} · ${d.vehicleNumber ?? "—"}`,
-            `<span style=\"color:#22c55e\">● Online</span>`,
+            `🚗 ${d.vehicleNumber ?? "—"}`,
+            `<span style="color:#22c55e">● Online</span>`,
           ])
         );
       });
 
+      // ── Active ride markers ─────────────────────────────────────────────────
       activeRides.forEach((t) => {
         if (t.pickup?.location?.coordinates) {
           const [lng, lat] = t.pickup.location.coordinates;
-          addMarker(
-            "pickup-" + t._id,
-            lng,
-            lat,
+          addMarker(lng, lat,
             createMarkerElement("#22c55e", "📍"),
             buildPopup("Pickup", [
               `${t.pickup?.address ?? "—"}`,
@@ -190,10 +199,7 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
         }
         if (t.drop?.location?.coordinates) {
           const [lng, lat] = t.drop.location.coordinates;
-          addMarker(
-            "drop-" + t._id,
-            lng,
-            lat,
+          addMarker(lng, lat,
             createMarkerElement("#ef4444", "🏁"),
             buildPopup("Drop", [
               `${t.drop?.address ?? "—"}`,
@@ -203,32 +209,53 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
         }
       });
 
+      // ── Route polyline for focused ride ────────────────────────────────────
       if (routePath.length === 2) {
         const routeData = {
           type: "Feature",
-          geometry: { type: "LineString", coordinates: routePath.map(point => [point.lng, point.lat]) },
+          geometry: { type: "LineString", coordinates: routePath.map(p => [p.lng, p.lat]) },
           properties: {},
         } as const;
-        if (map.getSource("focused-ride-route")) {
-          (map.getSource("focused-ride-route") as any).setData(routeData);
-        } else {
-          map.addSource("focused-ride-route", { type: "geojson", data: routeData });
-          map.addLayer({
-            id: "focused-ride-route-line",
-            type: "line",
-            source: "focused-ride-route",
-            layout: { "line-cap": "round", "line-join": "round" },
-            paint: { "line-color": "#6366f1", "line-width": 3, "line-opacity": 0.85 },
-          });
-        }
+        map.on("load", () => {
+          if (map.getSource("focused-ride-route")) {
+            (map.getSource("focused-ride-route") as any).setData(routeData);
+          } else {
+            map.addSource("focused-ride-route", { type: "geojson", data: routeData });
+            map.addLayer({
+              id: "focused-ride-route-line",
+              type: "line",
+              source: "focused-ride-route",
+              layout: { "line-cap": "round", "line-join": "round" },
+              paint: { "line-color": "#6366f1", "line-width": 3, "line-opacity": 0.85 },
+            });
+          }
+        });
       }
 
-      if (focusDriver?.currentLocation?.coordinates) {
+      // ── Fit bounds ──────────────────────────────────────────────────────────
+      if (focusDriver) {
         map.setCenter([center.lng, center.lat]);
         map.setZoom(zoom);
       } else if (routePath.length === 2) {
-        const [start, end] = routePath;
-        map.fitBounds([[Math.min(start.lng, end.lng), Math.min(start.lat, end.lat)], [Math.max(start.lng, end.lng), Math.max(start.lat, end.lat)]], { padding: 48, duration: 0 });
+        const [s, e] = routePath;
+        map.fitBounds(
+          [[Math.min(s.lng, e.lng), Math.min(s.lat, e.lat)], [Math.max(s.lng, e.lng), Math.max(s.lat, e.lat)]],
+          { padding: 48, duration: 0 }
+        );
+      } else if (drivers.length > 1) {
+        // Fit all driver markers
+        const allCoords = drivers.map(getDriverCoords).filter(Boolean) as [number, number][];
+        if (allCoords.length >= 2) {
+          const lngs = allCoords.map(c => c[0]);
+          const lats = allCoords.map(c => c[1]);
+          map.fitBounds(
+            [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+            { padding: 60, duration: 0, maxZoom: 14 }
+          );
+        } else {
+          map.setCenter([center.lng, center.lat]);
+          map.setZoom(zoom);
+        }
       } else {
         map.setCenter([center.lng, center.lat]);
         map.setZoom(zoom);
@@ -236,12 +263,8 @@ function LiveMap({ drivers = [], activeRides = [], focusDriver, focusRide, heigh
     };
 
     initMap().catch(console.warn);
-
-    return () => {
-      cancelled = true;
-      cleanup();
-    };
-  }, [activeRides, center.lat, center.lng, focusDriver, focusRide, routePath, zoom]);
+    return () => { cancelled = true; cleanup(); };
+  }, [activeRides, center.lat, center.lng, focusDriver, focusRide, routePath, zoom, drivers]);
 
   if (!MAPS_KEY) {
     return (
@@ -272,7 +295,8 @@ export function GPSMonitoring() {
 
   const activeRides   = useMemo(() => trips.filter((t: any) => t.status === "ride_started"), [trips]);
   const activeDrivers = useMemo(() => drivers.filter((d: any) => d.isOnline), [drivers]);
-  const withLocation  = useMemo(() => activeDrivers.filter((d: any) => d.currentLocation?.coordinates), [activeDrivers]);
+  // ✅ FIX: use getDriverCoords() which checks both location.coordinates and currentLocation.coordinates
+  const withLocation  = useMemo(() => activeDrivers.filter((d: any) => !!getDriverCoords(d)), [activeDrivers]);
 
   if (loading) return <Spinner label="Loading GPS data…" />;
   if (error)   return <PageError message={error} onRetry={refetch} />;
@@ -294,31 +318,58 @@ export function GPSMonitoring() {
 
       {/* ── Live Map ──────────────────────────────────────────────────────── */}
       <Card style={{ marginBottom: "1.5rem", overflow: "hidden" }}>
-        <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>
-          🗺️ Live Map — All Drivers &amp; Active Rides
+        <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontWeight: 700 }}>🗺️ Live Map — All Drivers &amp; Active Rides</span>
+          {/* Vehicle type legend */}
+          <div style={{ display: "flex", gap: 12, fontSize: "0.72rem", color: C.muted }}>
+            {[["🏍️","Bike","#6366f1"],["🛺","Auto","#f59e0b"],["🚗","Car","#22c55e"],["🚙","Premium","#8b5cf6"],["🚐","XL","#06b6d4"]].map(([e,l,c]) => (
+              <span key={l} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: c as string, display: "inline-block" }} />
+                {e} {l}
+              </span>
+            ))}
+          </div>
         </div>
         <div style={{ padding: "0.875rem" }}>
           <LiveMap drivers={withLocation} activeRides={activeRides} height={500} />
+          {withLocation.length === 0 && (
+            <div style={{ textAlign: "center", color: C.muted, fontSize: "0.82rem", marginTop: 8 }}>
+              No online drivers with GPS signal right now
+            </div>
+          )}
         </div>
       </Card>
 
       {/* Driver location table */}
       <Card style={{ marginBottom: "1.5rem" }}>
         <div style={{ padding: "0.875rem 1rem", borderBottom: "1px solid " + C.border, fontWeight: 700 }}>📍 Driver Locations</div>
-        <Table headers={["Driver", "Vehicle", "Status", "GPS Coordinates", "Active Ride", "Action"]} isEmpty={activeDrivers.length === 0} emptyMessage="No drivers online">
+        <Table headers={["Driver", "Vehicle", "Type", "Status", "GPS Coordinates", "Active Ride", "Action"]} isEmpty={activeDrivers.length === 0} emptyMessage="No drivers online">
           {activeDrivers.map((d: any) => {
-            const ride   = activeRides.find((t: any) => t.assignedDriver?._id === d._id);
-            const coords = d.currentLocation?.coordinates;
+            const ride   = activeRides.find((t: any) => t.assignedDriver?._id === d._id || t.assignedDriver === d._id);
+            const coords = getDriverCoords(d);
             return (
               <TR key={d._id} onClick={() => setSel({ type: "driver", data: d })}>
                 <TD><div style={{ fontWeight: 600 }}>{d.name}</div><div style={{ fontSize: "0.7rem", color: C.muted, fontFamily: "monospace" }}>{d.phone}</div></TD>
-                <TD><span style={{ fontSize: "0.8rem" }}>{d.vehicleType}</span></TD>
+                <TD mono muted style={{ fontSize: "0.8rem" }}>{d.vehicleNumber ?? "—"}</TD>
+                <TD>
+                  <span style={{ fontSize: "0.78rem", padding: "2px 8px", borderRadius: 6, background: "#1e2330", color: C.text }}>
+                    {d.vehicleType ? d.vehicleType.charAt(0).toUpperCase() + d.vehicleType.slice(1) : "—"}
+                  </span>
+                </TD>
                 <TD><Badge status="online" /></TD>
-                <TD mono muted style={{ fontSize: "0.7rem" }}>{coords ? coords[1].toFixed(5) + ", " + coords[0].toFixed(5) : "No signal"}</TD>
+                <TD mono muted style={{ fontSize: "0.7rem" }}>
+                  {coords ? coords[1].toFixed(5) + ", " + coords[0].toFixed(5) : <span style={{ color: C.red }}>No signal</span>}
+                </TD>
                 <TD muted style={{ fontSize: "0.75rem" }}>{ride ? "#" + ride._id.slice(-8).toUpperCase() : "—"}</TD>
                 <TD>
                   {coords && (
-                    <a href={"https://maps.olakrutrim.com/?q=" + coords[1] + "," + coords[0]} target="_blank" rel="noreferrer" style={{ color: C.primary, fontSize: "0.75rem", fontWeight: 700 }}>Open Ola Maps ↗</a>
+                    <a
+                      href={"https://maps.olakrutrim.com/?q=" + coords[1] + "," + coords[0]}
+                      target="_blank" rel="noreferrer"
+                      style={{ color: C.primary, fontSize: "0.75rem", fontWeight: 700 }}
+                    >
+                      Open Map ↗
+                    </a>
                   )}
                 </TD>
               </TR>
@@ -347,17 +398,20 @@ export function GPSMonitoring() {
 
       {/* Detail modal with real map */}
       <Modal open={!!sel} onClose={() => setSel(null)} title={sel?.type === "driver" ? "Driver Location" : "Ride Route"} width={560}>
-        {sel?.type === "driver" && sel.data && (
-          <>
-            <LiveMap focusDriver={sel.data} drivers={[sel.data]} height={280} />
-            <div style={{ marginTop: "0.875rem" }}>
-              <InfoRow label="Driver"      value={sel.data.name} />
-              <InfoRow label="Phone"       value={sel.data.phone} />
-              <InfoRow label="Vehicle"     value={sel.data.vehicleType} />
-              <InfoRow label="Coordinates" value={sel.data.currentLocation?.coordinates ? sel.data.currentLocation.coordinates[1].toFixed(6) + ", " + sel.data.currentLocation.coordinates[0].toFixed(6) : "—"} />
-            </div>
-          </>
-        )}
+        {sel?.type === "driver" && sel.data && (() => {
+          const coords = getDriverCoords(sel.data);
+          return (
+            <>
+              <LiveMap focusDriver={sel.data} drivers={[sel.data]} height={280} />
+              <div style={{ marginTop: "0.875rem" }}>
+                <InfoRow label="Driver"      value={sel.data.name} />
+                <InfoRow label="Phone"       value={sel.data.phone} />
+                <InfoRow label="Vehicle"     value={(sel.data.vehicleType ?? "—") + " · " + (sel.data.vehicleNumber ?? "—")} />
+                <InfoRow label="Coordinates" value={coords ? coords[1].toFixed(6) + ", " + coords[0].toFixed(6) : "No signal"} />
+              </div>
+            </>
+          );
+        })()}
         {sel?.type === "ride" && sel.data && (
           <>
             <LiveMap focusRide={sel.data} activeRides={[sel.data]} height={280} />

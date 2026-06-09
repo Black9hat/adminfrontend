@@ -24,6 +24,7 @@ import {
   AlertCircle,
   ArrowRight,
   PieChart,
+  Route,
 } from "lucide-react";
 
 const API_BASE = "/admin/fare";
@@ -46,6 +47,7 @@ interface FareRate {
   perRideIncentive?: number;
   perRideCoins?: number;
   isActive?: boolean;
+  thresholdKm?: number; // ✅ After this km → fare = perKm × distance
 }
 
 const COLORS = {
@@ -133,6 +135,7 @@ const FareManagement: React.FC = () => {
       perRideIncentive: rate.perRideIncentive,
       perRideCoins: rate.perRideCoins,
       isActive: rate.isActive,
+      thresholdKm: rate.thresholdKm, // ✅ included in save
     };
 
     try {
@@ -160,25 +163,37 @@ const FareManagement: React.FC = () => {
     }
   };
 
+  // ✅ Updated to use thresholdKm for accurate preview calculation
   const calculateFareBreakdown = (rate: FareRate, distance: number, time: number) => {
+    const thresholdKm = rate.thresholdKm ?? 6;
+    const perKm = rate.perKm;
     const baseFare = rate.baseFare;
-    const distanceFare = rate.perKm * distance;
+    const baseFareDistanceKm = 1; // default
+
+    let baseFareTotal: number;
+    if (distance > thresholdKm) {
+      baseFareTotal = perKm * distance;
+    } else {
+      const chargeableDistance = Math.max(0, distance - baseFareDistanceKm);
+      baseFareTotal = baseFare + chargeableDistance * perKm;
+    }
+
     const timeFare = (rate.perMin ?? 0) * time;
-    const subtotal = baseFare + distanceFare + timeFare;
-    
+    const subtotal = baseFareTotal + timeFare;
+
     const surgeMultiplier = rate.manualSurge ?? 1;
     const surgeAmount = subtotal * (surgeMultiplier - 1);
     const afterSurge = subtotal + surgeAmount;
-    
+
     const gstAmount = (afterSurge * (rate.gstPercent ?? 0)) / 100;
     const totalCustomerPays = Math.max(afterSurge + gstAmount, rate.minFare ?? 0);
-    
+
     const platformFee = (afterSurge * (rate.platformFeePercent ?? 10)) / 100;
     const driverEarnings = afterSurge - platformFee + (rate.perRideIncentive ?? 0);
-    
+
     return {
-      baseFare,
-      distanceFare,
+      baseFare: distance > thresholdKm ? 0 : baseFare,
+      distanceFare: distance > thresholdKm ? perKm * distance : Math.max(0, distance - 1) * perKm,
       timeFare,
       subtotal,
       surgeMultiplier,
@@ -191,6 +206,7 @@ const FareManagement: React.FC = () => {
       perRideIncentive: rate.perRideIncentive ?? 0,
       perRideCoins: rate.perRideCoins ?? 0,
       commission: platformFee,
+      thresholdApplied: distance > thresholdKm,
     };
   };
 
@@ -206,7 +222,7 @@ const FareManagement: React.FC = () => {
     return (
       <div className="flex items-center justify-center" style={{ minHeight: '100%', backgroundColor: COLORS.surface }}>
         <div className="text-center">
-          <div className="w-12 h-12 border-4 rounded-full animate-spin mx-auto mb-4" 
+          <div className="w-12 h-12 border-4 rounded-full animate-spin mx-auto mb-4"
                style={{ borderColor: COLORS.primaryLight, borderTopColor: COLORS.primary }}></div>
           <p style={{ color: COLORS.onSurfaceSecondary }} className="font-medium">Loading fare configuration...</p>
         </div>
@@ -217,13 +233,13 @@ const FareManagement: React.FC = () => {
   return (
     <div className="flex h-full" style={{ minHeight: '100%', backgroundColor: COLORS.surface }}>
       {/* LEFT SIDEBAR */}
-      <div className="w-[420px] min-w-[420px] flex flex-col border-r h-full" 
+      <div className="w-[420px] min-w-[420px] flex flex-col border-r h-full"
            style={{ backgroundColor: COLORS.background, borderColor: COLORS.divider }}>
         {/* Header */}
         <div className="p-6 flex-shrink-0" style={{ backgroundColor: COLORS.primary }}>
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" 
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center"
                    style={{ backgroundColor: 'rgba(255,255,255,0.15)' }}>
                 <DollarSign className="w-6 h-6" style={{ color: COLORS.onPrimary }} />
               </div>
@@ -252,8 +268,8 @@ const FareManagement: React.FC = () => {
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search vehicle type..."
               className="w-full pl-10 pr-10 py-3 rounded-xl text-sm focus:outline-none focus:ring-2 transition-all"
-              style={{ 
-                backgroundColor: 'rgba(255,255,255,0.2)', 
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.2)',
                 color: COLORS.onPrimary,
                 borderColor: 'rgba(255,255,255,0.3)',
               }}
@@ -276,7 +292,7 @@ const FareManagement: React.FC = () => {
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
                 filterVehicle === "all" ? "" : "opacity-70"
               }`}
-              style={{ 
+              style={{
                 backgroundColor: filterVehicle === "all" ? COLORS.onPrimary : 'rgba(255,255,255,0.15)',
                 color: filterVehicle === "all" ? COLORS.primary : COLORS.onPrimary,
               }}
@@ -290,7 +306,7 @@ const FareManagement: React.FC = () => {
                 className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all capitalize ${
                   filterVehicle === type ? "" : "opacity-70"
                 }`}
-                style={{ 
+                style={{
                   backgroundColor: filterVehicle === type ? COLORS.onPrimary : 'rgba(255,255,255,0.15)',
                   color: filterVehicle === type ? COLORS.primary : COLORS.onPrimary,
                 }}
@@ -322,7 +338,7 @@ const FareManagement: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {filteredRates.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16">
-              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-3" 
+              <div className="w-16 h-16 rounded-full flex items-center justify-center mb-3"
                    style={{ backgroundColor: COLORS.surface }}>
                 <Search className="w-8 h-8" style={{ color: COLORS.onSurfaceTertiary }} />
               </div>
@@ -352,7 +368,7 @@ const FareManagement: React.FC = () => {
                   <div className="p-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-xl flex items-center justify-center" 
+                        <div className="w-12 h-12 rounded-xl flex items-center justify-center"
                              style={{ backgroundColor: COLORS.primaryLight, color: COLORS.primary }}>
                           {getVehicleIcon(rate.vehicleType)}
                         </div>
@@ -389,7 +405,7 @@ const FareManagement: React.FC = () => {
                       style={{ borderColor: COLORS.divider }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Base Pricing - Larger Inputs */}
+                      {/* Base Pricing */}
                       <div>
                         <div className="flex items-center gap-2 mb-4">
                           <DollarSign className="w-5 h-5" style={{ color: COLORS.primary }} />
@@ -405,7 +421,7 @@ const FareManagement: React.FC = () => {
                               value={rate.baseFare}
                               onChange={(e) => handleChange(actualIndex, "baseFare", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -421,7 +437,7 @@ const FareManagement: React.FC = () => {
                               value={rate.perKm}
                               onChange={(e) => handleChange(actualIndex, "perKm", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -438,7 +454,7 @@ const FareManagement: React.FC = () => {
                               value={rate.perMin ?? 0}
                               onChange={(e) => handleChange(actualIndex, "perMin", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -454,12 +470,51 @@ const FareManagement: React.FC = () => {
                               value={rate.minFare ?? 0}
                               onChange={(e) => handleChange(actualIndex, "minFare", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
                               }}
                             />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ✅ Per-Km Threshold — standalone section */}
+                      <div className="rounded-xl p-4 border-2" style={{ backgroundColor: COLORS.primaryLight, borderColor: COLORS.primary }}>
+                        <div className="flex items-center gap-2 mb-3">
+                          <Route className="w-5 h-5" style={{ color: COLORS.primary }} />
+                          <h4 className="font-semibold" style={{ color: COLORS.primary }}>Per-Km Threshold</h4>
+                        </div>
+                        <div className="flex items-end gap-4">
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium mb-2" style={{ color: COLORS.onSurfaceSecondary }}>
+                              Threshold Distance (km)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.5"
+                              value={rate.thresholdKm ?? 6}
+                              onChange={(e) => handleChange(actualIndex, "thresholdKm", Number(e.target.value))}
+                              className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
+                              style={{
+                                backgroundColor: COLORS.background,
+                                borderColor: COLORS.primary,
+                                color: COLORS.onSurface,
+                              }}
+                            />
+                          </div>
+                          <div className="flex-1 pb-1">
+                            <p className="text-sm font-medium" style={{ color: COLORS.primary }}>
+                              After {rate.thresholdKm ?? 6} km:
+                            </p>
+                            <p className="text-xs mt-1" style={{ color: COLORS.onSurfaceSecondary }}>
+                              fare = ₹{rate.perKm} × distance
+                            </p>
+                            <p className="text-xs" style={{ color: COLORS.onSurfaceTertiary }}>
+                              (fare ÷ km = ₹{rate.perKm} exactly)
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -483,7 +538,7 @@ const FareManagement: React.FC = () => {
                               value={rate.manualSurge ?? 1.0}
                               onChange={(e) => handleChange(actualIndex, "manualSurge", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -507,7 +562,7 @@ const FareManagement: React.FC = () => {
                               value={rate.peakMultiplier ?? 1.0}
                               onChange={(e) => handleChange(actualIndex, "peakMultiplier", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -526,7 +581,7 @@ const FareManagement: React.FC = () => {
                               value={rate.nightMultiplier ?? 1.0}
                               onChange={(e) => handleChange(actualIndex, "nightMultiplier", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -553,7 +608,7 @@ const FareManagement: React.FC = () => {
                               value={rate.perRideIncentive ?? 0}
                               onChange={(e) => handleChange(actualIndex, "perRideIncentive", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.background,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -570,7 +625,7 @@ const FareManagement: React.FC = () => {
                               value={rate.perRideCoins ?? 0}
                               onChange={(e) => handleChange(actualIndex, "perRideCoins", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.background,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -597,7 +652,7 @@ const FareManagement: React.FC = () => {
                               value={rate.platformFeePercent ?? 10}
                               onChange={(e) => handleChange(actualIndex, "platformFeePercent", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -614,7 +669,7 @@ const FareManagement: React.FC = () => {
                               value={rate.gstPercent ?? 0}
                               onChange={(e) => handleChange(actualIndex, "gstPercent", Number(e.target.value))}
                               className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2 transition-all"
-                              style={{ 
+                              style={{
                                 backgroundColor: COLORS.surface,
                                 borderColor: COLORS.divider,
                                 color: COLORS.onSurface,
@@ -674,7 +729,7 @@ const FareManagement: React.FC = () => {
         {!expandedCard ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center max-w-md">
-              <div className="w-24 h-24 rounded-2xl flex items-center justify-center mx-auto mb-6" 
+              <div className="w-24 h-24 rounded-2xl flex items-center justify-center mx-auto mb-6"
                    style={{ backgroundColor: COLORS.primaryLight }}>
                 <Calculator className="w-12 h-12" style={{ color: COLORS.primary }} />
               </div>
@@ -702,13 +757,14 @@ const FareManagement: React.FC = () => {
             if (!selectedRate) return null;
 
             const breakdown = calculateFareBreakdown(selectedRate, previewDistance, previewTime);
+            const thresholdKm = selectedRate.thresholdKm ?? 6;
 
             return (
               <div className="flex-1 overflow-y-auto">
                 {/* Header */}
                 <div className="p-6 border-b" style={{ backgroundColor: COLORS.primary, borderColor: COLORS.divider }}>
                   <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 rounded-xl flex items-center justify-center" 
+                    <div className="w-16 h-16 rounded-xl flex items-center justify-center"
                          style={{ backgroundColor: 'rgba(255,255,255,0.2)' }}>
                       {getVehicleIcon(selectedRate.vehicleType)}
                     </div>
@@ -719,6 +775,12 @@ const FareManagement: React.FC = () => {
                       <p className="opacity-80" style={{ color: COLORS.onPrimary }}>
                         Fare Breakdown Calculator
                       </p>
+                    </div>
+                    {/* ✅ Threshold badge in header */}
+                    <div className="ml-auto px-4 py-2 rounded-xl"
+                         style={{ backgroundColor: 'rgba(255,255,255,0.2)' }}>
+                      <p className="text-xs opacity-80" style={{ color: COLORS.onPrimary }}>Per-Km Threshold</p>
+                      <p className="text-lg font-bold" style={{ color: COLORS.onPrimary }}>{thresholdKm} km</p>
                     </div>
                   </div>
                 </div>
@@ -731,6 +793,16 @@ const FareManagement: React.FC = () => {
                       <h3 className="font-bold text-lg" style={{ color: COLORS.onSurface }}>
                         Calculate Sample Fare
                       </h3>
+                      {/* ✅ Show which mode is active */}
+                      <span className="ml-auto text-xs px-3 py-1 rounded-full font-semibold"
+                            style={{
+                              backgroundColor: breakdown.thresholdApplied ? COLORS.primaryLight : COLORS.surface,
+                              color: breakdown.thresholdApplied ? COLORS.primary : COLORS.onSurfaceSecondary,
+                            }}>
+                        {breakdown.thresholdApplied
+                          ? `⚡ Threshold mode (>${thresholdKm}km)`
+                          : `📍 Base fare mode (≤${thresholdKm}km)`}
+                      </span>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
@@ -742,7 +814,7 @@ const FareManagement: React.FC = () => {
                           value={previewDistance}
                           onChange={(e) => setPreviewDistance(Number(e.target.value))}
                           className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2"
-                          style={{ 
+                          style={{
                             backgroundColor: COLORS.surface,
                             borderColor: COLORS.divider,
                             color: COLORS.onSurface,
@@ -758,7 +830,7 @@ const FareManagement: React.FC = () => {
                           value={previewTime}
                           onChange={(e) => setPreviewTime(Number(e.target.value))}
                           className="w-full px-4 py-3 rounded-xl text-base font-semibold focus:outline-none focus:ring-2"
-                          style={{ 
+                          style={{
                             backgroundColor: COLORS.surface,
                             borderColor: COLORS.divider,
                             color: COLORS.onSurface,
@@ -775,27 +847,49 @@ const FareManagement: React.FC = () => {
                       <h3 className="font-bold text-xl" style={{ color: COLORS.primary }}>
                         Customer View
                       </h3>
-                      <span className="ml-auto text-sm px-3 py-1 rounded-full" 
+                      <span className="ml-auto text-sm px-3 py-1 rounded-full"
                             style={{ backgroundColor: COLORS.primaryLight, color: COLORS.primary }}>
                         What Customer Pays
                       </span>
                     </div>
 
                     <div className="space-y-3 mb-6">
-                      <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: COLORS.surface }}>
-                        <span style={{ color: COLORS.onSurfaceSecondary }}>Base Fare</span>
-                        <span className="font-bold" style={{ color: COLORS.onSurface }}>
-                          ₹{breakdown.baseFare.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: COLORS.surface }}>
-                        <span style={{ color: COLORS.onSurfaceSecondary }}>
-                          Distance ({previewDistance} km × ₹{selectedRate.perKm})
-                        </span>
-                        <span className="font-bold" style={{ color: COLORS.onSurface }}>
-                          ₹{breakdown.distanceFare.toFixed(2)}
-                        </span>
-                      </div>
+                      {breakdown.thresholdApplied ? (
+                        // ✅ Threshold mode — show pure per-km row
+                        <div className="flex justify-between items-center p-3 rounded-lg border"
+                             style={{ backgroundColor: COLORS.primaryLight, borderColor: COLORS.primary }}>
+                          <div>
+                            <span className="font-medium" style={{ color: COLORS.primary }}>
+                              Per-Km Fare ({previewDistance} km × ₹{selectedRate.perKm})
+                            </span>
+                            <p className="text-xs" style={{ color: COLORS.onSurfaceTertiary }}>
+                              Threshold mode — fare ÷ km = ₹{selectedRate.perKm} exactly
+                            </p>
+                          </div>
+                          <span className="font-bold" style={{ color: COLORS.primary }}>
+                            ₹{(selectedRate.perKm * previewDistance).toFixed(2)}
+                          </span>
+                        </div>
+                      ) : (
+                        // Normal mode — base fare + distance
+                        <>
+                          <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: COLORS.surface }}>
+                            <span style={{ color: COLORS.onSurfaceSecondary }}>Base Fare</span>
+                            <span className="font-bold" style={{ color: COLORS.onSurface }}>
+                              ₹{breakdown.baseFare.toFixed(2)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: COLORS.surface }}>
+                            <span style={{ color: COLORS.onSurfaceSecondary }}>
+                              Distance ({previewDistance} km × ₹{selectedRate.perKm})
+                            </span>
+                            <span className="font-bold" style={{ color: COLORS.onSurface }}>
+                              ₹{breakdown.distanceFare.toFixed(2)}
+                            </span>
+                          </div>
+                        </>
+                      )}
+
                       <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: COLORS.surface }}>
                         <span style={{ color: COLORS.onSurfaceSecondary }}>
                           Time ({previewTime} min × ₹{selectedRate.perMin ?? 0})
@@ -806,7 +900,7 @@ const FareManagement: React.FC = () => {
                       </div>
 
                       {breakdown.surgeAmount > 0 && (
-                        <div className="flex justify-between items-center p-3 rounded-lg border" 
+                        <div className="flex justify-between items-center p-3 rounded-lg border"
                              style={{ backgroundColor: COLORS.background, borderColor: COLORS.warning }}>
                           <div>
                             <span className="font-medium" style={{ color: COLORS.warning }}>Surge Pricing</span>
@@ -849,7 +943,7 @@ const FareManagement: React.FC = () => {
                       <h3 className="font-bold text-xl" style={{ color: COLORS.success }}>
                         Driver View
                       </h3>
-                      <span className="ml-auto text-sm px-3 py-1 rounded-full" 
+                      <span className="ml-auto text-sm px-3 py-1 rounded-full"
                             style={{ backgroundColor: `${COLORS.success}20`, color: COLORS.success }}>
                         Driver Earnings
                       </span>
@@ -862,7 +956,7 @@ const FareManagement: React.FC = () => {
                           ₹{breakdown.afterSurge.toFixed(2)}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center p-3 rounded-lg border" 
+                      <div className="flex justify-between items-center p-3 rounded-lg border"
                            style={{ backgroundColor: COLORS.background, borderColor: COLORS.error }}>
                         <div>
                           <span className="font-medium" style={{ color: COLORS.error }}>Platform Commission</span>
@@ -876,7 +970,7 @@ const FareManagement: React.FC = () => {
                       </div>
 
                       {breakdown.perRideIncentive > 0 && (
-                        <div className="flex justify-between items-center p-3 rounded-lg border" 
+                        <div className="flex justify-between items-center p-3 rounded-lg border"
                              style={{ backgroundColor: COLORS.background, borderColor: COLORS.success }}>
                           <div>
                             <span className="font-medium" style={{ color: COLORS.success }}>Ride Incentive</span>
@@ -891,7 +985,7 @@ const FareManagement: React.FC = () => {
                       )}
 
                       {breakdown.perRideCoins > 0 && (
-                        <div className="flex justify-between items-center p-3 rounded-lg" 
+                        <div className="flex justify-between items-center p-3 rounded-lg"
                              style={{ backgroundColor: `${COLORS.warning}10` }}>
                           <div className="flex items-center gap-2">
                             <Gift className="w-4 h-4" style={{ color: COLORS.warning }} />
@@ -921,7 +1015,7 @@ const FareManagement: React.FC = () => {
                       <h3 className="font-bold text-xl" style={{ color: COLORS.onSurface }}>
                         Platform Revenue
                       </h3>
-                      <span className="ml-auto text-sm px-3 py-1 rounded-full" 
+                      <span className="ml-auto text-sm px-3 py-1 rounded-full"
                             style={{ backgroundColor: COLORS.surface, color: COLORS.onSurfaceSecondary }}>
                         Your Commission
                       </span>
@@ -966,7 +1060,7 @@ const FareManagement: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Per Km Breakdown */}
+                  {/* Per Km Breakdown Table */}
                   <div className="rounded-xl p-6 border" style={{ backgroundColor: COLORS.background, borderColor: COLORS.divider }}>
                     <div className="flex items-center gap-2 mb-4">
                       <TrendingUp className="w-5 h-5" style={{ color: COLORS.primary }} />
@@ -980,19 +1074,42 @@ const FareManagement: React.FC = () => {
                         <thead>
                           <tr style={{ backgroundColor: COLORS.surface }}>
                             <th className="text-left p-3 text-sm font-semibold" style={{ color: COLORS.onSurfaceSecondary }}>Distance</th>
+                            <th className="text-left p-3 text-sm font-semibold" style={{ color: COLORS.onSurfaceTertiary }}>Mode</th>
                             <th className="text-right p-3 text-sm font-semibold" style={{ color: COLORS.primary }}>Customer</th>
+                            <th className="text-right p-3 text-sm font-semibold" style={{ color: COLORS.onSurfaceSecondary }}>÷ km</th>
                             <th className="text-right p-3 text-sm font-semibold" style={{ color: COLORS.success }}>Driver</th>
                             <th className="text-right p-3 text-sm font-semibold" style={{ color: COLORS.onSurfaceSecondary }}>Platform</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {[1, 5, 10, 15, 20].map((km) => {
+                          {[1, 3, 5, thresholdKm, thresholdKm + 1, 10, 15, 20].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b).map((km) => {
                             const calc = calculateFareBreakdown(selectedRate, km, km * 2);
+                            const farePerKm = calc.totalCustomerPays / km;
+                            const isThresholdRow = km === thresholdKm || km === thresholdKm + 1;
                             return (
-                              <tr key={km} className="border-t" style={{ borderColor: COLORS.divider }}>
-                                <td className="p-3" style={{ color: COLORS.onSurface }}>{km} km</td>
+                              <tr
+                                key={km}
+                                className="border-t"
+                                style={{
+                                  borderColor: COLORS.divider,
+                                  backgroundColor: isThresholdRow ? COLORS.primaryLight : "transparent",
+                                }}
+                              >
+                                <td className="p-3 font-medium" style={{ color: COLORS.onSurface }}>{km} km</td>
+                                <td className="p-3">
+                                  <span className="text-xs px-2 py-0.5 rounded-full"
+                                        style={{
+                                          backgroundColor: calc.thresholdApplied ? COLORS.primaryLight : COLORS.surface,
+                                          color: calc.thresholdApplied ? COLORS.primary : COLORS.onSurfaceTertiary,
+                                        }}>
+                                    {calc.thresholdApplied ? "⚡ threshold" : "base"}
+                                  </span>
+                                </td>
                                 <td className="text-right p-3 font-semibold" style={{ color: COLORS.primary }}>
                                   ₹{calc.totalCustomerPays.toFixed(0)}
+                                </td>
+                                <td className="text-right p-3 font-semibold text-sm" style={{ color: COLORS.onSurfaceTertiary }}>
+                                  ₹{farePerKm.toFixed(1)}
                                 </td>
                                 <td className="text-right p-3 font-semibold" style={{ color: COLORS.success }}>
                                   ₹{calc.driverEarnings.toFixed(0)}
