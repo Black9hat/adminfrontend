@@ -58,6 +58,21 @@ const T = {
 };
 
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 };
+const SOS_ALARM_SRC = '/sos-alarm-buzzer.mp3';
+const SOS_RESOLVE_SILENCE_MS = 2 * 60 * 1000;
+
+const sosIdOf = (sos: any) => sos?._id ? String(sos._id) : '';
+const sosTripIdOf = (sos: any) => sos?.tripId ? String(sos.tripId) : '';
+const isSameSos = (a: any, b: any) => {
+  const aId = sosIdOf(a);
+  const bId = sosIdOf(b);
+  if (aId && bId && aId === bId) return true;
+
+  const aTripId = sosTripIdOf(a);
+  const bTripId = sosTripIdOf(b);
+  return Boolean(aTripId && bTripId && aTripId === bTripId);
+};
+const isActiveSosPayload = (sos: any) => String(sos?.status ?? 'ACTIVE').toUpperCase() === 'ACTIVE';
 
 /* ═══════════════════════════════════════════════════════════
    INJECT ANIMATIONS (once)
@@ -471,7 +486,8 @@ function useSosSound() {
   const play = useCallback(() => {
     try {
       if (!ref.current) {
-        ref.current = new Audio('/alert.mp3');
+        ref.current = new Audio(SOS_ALARM_SRC);
+        ref.current.preload = 'auto';
         ref.current.loop = true;
       }
       ref.current.currentTime = 0;
@@ -507,22 +523,56 @@ export default function SOSMonitoring() {
 
   const { playing: soundOn, play: playAlarm, stop: stopAlarm } = useSosSound();
   const sockRef = useRef<ReturnType<typeof socketIO> | null>(null);
+  const alertsRef = useRef<any[]>([]);
+  const resolvedSosRef = useRef<Map<string, number>>(new Map());
 
   const notify = useCallback((text: string, ok = true) => setToast({ text, ok }), []);
+
+  useEffect(() => {
+    alertsRef.current = alerts;
+  }, [alerts]);
+
+  const purgeResolvedSos = useCallback(() => {
+    const now = Date.now();
+    resolvedSosRef.current.forEach((expiresAt, key) => {
+      if (expiresAt <= now) resolvedSosRef.current.delete(key);
+    });
+  }, []);
+
+  const markSosResolvedLocally = useCallback((sos: any) => {
+    purgeResolvedSos();
+    const expiresAt = Date.now() + SOS_RESOLVE_SILENCE_MS;
+    [sosIdOf(sos), sosTripIdOf(sos)].filter(Boolean).forEach(key => {
+      resolvedSosRef.current.set(key, expiresAt);
+    });
+  }, [purgeResolvedSos]);
+
+  const isSosResolvedLocally = useCallback((sos: any) => {
+    purgeResolvedSos();
+    const now = Date.now();
+    return [sosIdOf(sos), sosTripIdOf(sos)].filter(Boolean).some(key => {
+      const expiresAt = resolvedSosRef.current.get(key);
+      return Boolean(expiresAt && expiresAt > now);
+    });
+  }, [purgeResolvedSos]);
 
   /* ── Fetch active alerts ── */
   const fetchAlerts = useCallback(async () => {
     setLoading(true);
     try {
       const d = await sosGet('/api/sos/active');
-      if (d.success) setAlerts(d.alerts ?? []);
+      if (d.success) {
+        const nextAlerts = (d.alerts ?? []).filter((alert: any) => isActiveSosPayload(alert) && !isSosResolvedLocally(alert));
+        alertsRef.current = nextAlerts;
+        setAlerts(nextAlerts);
+      }
       else notify('Failed to load SOS alerts', false);
     } catch {
       notify('Network error loading alerts', false);
     } finally {
       setLoading(false);
     }
-  }, [notify]);
+  }, [isSosResolvedLocally, notify]);
 
   useEffect(() => { fetchAlerts(); }, [fetchAlerts]);
 
@@ -540,30 +590,46 @@ export default function SOSMonitoring() {
     sock.on('disconnect', () => setSocketLive(false));
 
     sock.on('SOS_ALERT', (p: any) => {
-      setAlerts(prev => prev.find(a => a._id === p._id) ? prev : [p, ...prev]);
+      if (!isActiveSosPayload(p) || isSosResolvedLocally(p)) return;
+      if (alertsRef.current.some(a => isSameSos(a, p))) return;
+
+      alertsRef.current = [p, ...alertsRef.current];
+      setAlerts(prev => {
+        if (prev.some(a => isSameSos(a, p))) return prev;
+        return [p, ...prev];
+      });
+
       playAlarm();
       notify('🚨 NEW SOS — ' + (p.customerName || 'Unknown customer'), false);
     });
 
     sock.on('SOS_LOCATION_UPDATE', (p: any) => {
+      if (isSosResolvedLocally(p)) return;
       const patch = (a: any) => a._id === p._id ? { ...a, location: p.location } : a;
+      alertsRef.current = alertsRef.current.map(patch);
       setAlerts(prev => prev.map(patch));
       setSelected((prev: any) => prev?._id === p._id ? patch(prev) : prev);
     });
 
     sock.on('SOS_DRIVER_LOCATION_UPDATE', (p: any) => {
+      if (isSosResolvedLocally(p)) return;
       const patch = (a: any) => a._id === p._id ? { ...a, driverLocation: p.driverLocation } : a;
+      alertsRef.current = alertsRef.current.map(patch);
       setAlerts(prev => prev.map(patch));
       setSelected((prev: any) => prev?._id === p._id ? patch(prev) : prev);
     });
 
     sock.on('SOS_RESOLVED', (p: any) => {
-      setAlerts(prev => prev.filter(a => a._id !== p._id));
+      const alreadyHandled = isSosResolvedLocally(p);
+      markSosResolvedLocally(p);
+      stopAlarm();
+      alertsRef.current = alertsRef.current.filter(a => !isSameSos(a, p));
+      setAlerts(prev => prev.filter(a => !isSameSos(a, p)));
       setSelected((prev: any) => {
-        if (prev?._id === p._id) { setModalOpen(false); return null; }
+        if (prev && isSameSos(prev, p)) { setModalOpen(false); return null; }
         return prev;
       });
-      setResolvedToday(n => n + 1);
+      if (!alreadyHandled) setResolvedToday(n => n + 1);
     });
 
     sock.on('SOS_ESCALATED', (p: any) => {
@@ -573,7 +639,7 @@ export default function SOSMonitoring() {
     });
 
     return () => { sock.disconnect(); };
-  }, [playAlarm, notify]);
+  }, [isSosResolvedLocally, markSosResolvedLocally, notify, playAlarm, stopAlarm]);
 
   /* ── Actions ── */
   const selectAlert = useCallback((alert: any) => {
@@ -593,9 +659,13 @@ export default function SOSMonitoring() {
     try {
       const d = await sosPost('/api/sos/resolve', { sos_id: sos._id, resolvedBy: 'admin' });
       if (d.success) {
+        const resolvedSos = d.alert ?? sos;
+        markSosResolvedLocally(resolvedSos);
+        stopAlarm();
         notify('✅ SOS resolved');
-        setAlerts(prev => prev.filter(a => a._id !== sos._id));
-        setResolvedToday(n => n + 1);
+        alertsRef.current = alertsRef.current.filter(a => !isSameSos(a, resolvedSos));
+        setAlerts(prev => prev.filter(a => !isSameSos(a, resolvedSos)));
+        if (!d.alreadyResolved) setResolvedToday(n => n + 1);
         setSelected(null);
         setModalOpen(false);
       } else {
@@ -603,7 +673,7 @@ export default function SOSMonitoring() {
       }
     } catch { notify('Network error', false); }
     finally { setActing(false); }
-  }, [notify]);
+  }, [markSosResolvedLocally, notify, stopAlarm]);
 
   const handleEscalate = useCallback(async (sos: any) => {
     if (!sos) return;
