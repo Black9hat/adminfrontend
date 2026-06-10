@@ -270,13 +270,6 @@ function makeMarkerEl(color: string, emoji: string, size = 36): HTMLDivElement {
   return el;
 }
 
-function popupHtml(title: string, lines: string[]) {
-  return `<div style="font-family:Inter,sans-serif;min-width:170px;color:#0f172a">
-    <div style="font-size:0.7rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:5px">${title}</div>
-    ${lines.map(l => `<div style="font-size:0.8rem;line-height:1.55;color:#334155">${l}</div>`).join('')}
-  </div>`;
-}
-
 /* ═══════════════════════════════════════════════════════════
    MAIN COMPONENT
 ═══════════════════════════════════════════════════════════ */
@@ -329,8 +322,8 @@ export default function ServiceAreaManagement() {
   const [livePointCount, setLivePointCount] = useState(0);
 
   // Layer storage
-  const zoneLayers = useRef<Map<string, any>>(new Map());
-  const exLayers   = useRef<Map<string, any>>(new Map());
+  const zoneLayers = useRef<Map<string, { layerId: string; sourceId: string }>>(new Map());
+  const exLayers   = useRef<Map<string, { layerId: string; sourceId: string }>>(new Map());
   const editingPolygon = useRef<any>(null);
 
   const modeRef = useRef<Mode>({ tag: 'idle' });
@@ -509,9 +502,27 @@ export default function ServiceAreaManagement() {
     return () => {
       cancelled = true;
       setMapReady(false);
-      zoneLayers.current.forEach(l => l.remove?.());
+      zoneLayers.current.forEach(({ layerId, sourceId }) => {
+        try {
+          const map = mapInst.current;
+          if (map) {
+            if (map.getLayer(`${layerId}-outline`)) map.removeLayer(`${layerId}-outline`);
+            if (map.getLayer(layerId)) map.removeLayer(layerId);
+            if (map.getSource(sourceId)) map.removeSource(sourceId);
+          }
+        } catch {}
+      });
       zoneLayers.current.clear();
-      exLayers.current.forEach(l => l.remove?.());
+      exLayers.current.forEach(({ layerId, sourceId }) => {
+        try {
+          const map = mapInst.current;
+          if (map) {
+            if (map.getLayer(`${layerId}-outline`)) map.removeLayer(`${layerId}-outline`);
+            if (map.getLayer(layerId)) map.removeLayer(layerId);
+            if (map.getSource(sourceId)) map.removeSource(sourceId);
+          }
+        } catch {}
+      });
       exLayers.current.clear();
       mapInst.current?.remove?.();
       mapInst.current = null;
@@ -523,10 +534,46 @@ export default function ServiceAreaManagement() {
     const map = mapInst.current;
     if (!map || !mapReady) return;
 
-    // Clear existing zone layers
-    zoneLayers.current.forEach(l => l.remove?.());
+    // Clear existing zone layers PROPERLY
+    zoneLayers.current.forEach(({ layerId, sourceId }) => {
+      try {
+        // Remove outline layer first
+        if (map.getLayer(`${layerId}-outline`)) {
+          map.removeLayer(`${layerId}-outline`);
+        }
+        // Then remove fill layer
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+        // Finally remove source
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
+      } catch (err) {
+        console.warn('Layer cleanup error:', err);
+      }
+    });
     zoneLayers.current.clear();
-    exLayers.current.forEach(l => l.remove?.());
+
+    // Clear exclusion layers PROPERLY
+    exLayers.current.forEach(({ layerId, sourceId }) => {
+      try {
+        // Remove outline layer first
+        if (map.getLayer(`${layerId}-outline`)) {
+          map.removeLayer(`${layerId}-outline`);
+        }
+        // Then remove fill layer
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+        // Finally remove source
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
+      } catch (err) {
+        console.warn('Exclusion layer cleanup error:', err);
+      }
+    });
     exLayers.current.clear();
 
     const activeId =
@@ -563,9 +610,19 @@ export default function ServiceAreaManagement() {
       const sourceId = `zone-${zone._id}`;
       const layerId = `zone-layer-${zone._id}`;
 
-      if (map.getSource(sourceId)) {
-        map.removeLayer(layerId);
-        map.removeSource(sourceId);
+      // Safety check - remove if exists (shouldn't happen with proper cleanup above)
+      try {
+        if (map.getLayer(`${layerId}-outline`)) {
+          map.removeLayer(`${layerId}-outline`);
+        }
+        if (map.getLayer(layerId)) {
+          map.removeLayer(layerId);
+        }
+        if (map.getSource(sourceId)) {
+          map.removeSource(sourceId);
+        }
+      } catch (err) {
+        // Ignore cleanup errors
       }
 
       map.addSource(sourceId, {
@@ -583,21 +640,43 @@ export default function ServiceAreaManagement() {
         },
       });
 
+      // Calculate line-dasharray - MUST be array or omitted entirely
+      const lineDashArray = (() => {
+        if (!zone.serviceEnabled) {
+          return [8, 5]; // Disabled zones: dashed
+        }
+        if (zone.type === 'city') {
+          return undefined; // City zones: solid line (no dasharray)
+        }
+        return [4, 3]; // Cluster/area zones: small dashes
+      })();
+
+      // Build outline layer paint config
+      const outlinePaint: any = {
+        'line-color': isSel ? T.amber : color,
+        'line-width': isSel ? 3 : zone.type === 'city' ? 2.5 : 1.5,
+      };
+
+      // Only add line-dasharray if it's defined
+      if (lineDashArray) {
+        outlinePaint['line-dasharray'] = lineDashArray;
+      }
+
       map.addLayer({
         id: `${layerId}-outline`,
         type: 'line',
         source: sourceId,
-        paint: {
-          'line-color': isSel ? T.amber : color,
-          'line-width': isSel ? 3 : zone.type === 'city' ? 2.5 : 1.5,
-          'line-dasharray': !zone.serviceEnabled ? [8, 5] : zone.type === 'city' ? undefined : [4, 3],
-        },
+        paint: outlinePaint,
       });
 
       // Store for cleanup
       zoneLayers.current.set(zone._id, { layerId, sourceId });
 
-      // Click handler
+      // Click handler - remove old handler first
+      try {
+        map.off('click', layerId);
+      } catch {}
+      
       map.on('click', layerId, () => {
         const fresh = zones.find(z => z._id === zone._id) ?? zone;
         setMode({ tag: 'detail', zone: fresh });
@@ -621,23 +700,39 @@ export default function ServiceAreaManagement() {
         const exSourceId = `exclusion-${ex._id}`;
         const exLayerId = `exclusion-layer-${ex._id}`;
 
-        if (map.getSource(exSourceId)) {
-          map.removeLayer(exLayerId);
-          map.removeSource(exSourceId);
+        // Safety cleanup
+        try {
+          if (map.getLayer(`${exLayerId}-outline`)) {
+            map.removeLayer(`${exLayerId}-outline`);
+          }
+          if (map.getLayer(exLayerId)) {
+            map.removeLayer(exLayerId);
+          }
+          if (map.getSource(exSourceId)) {
+            map.removeSource(exSourceId);
+          }
+        } catch (err) {
+          // Ignore
         }
 
         map.addSource(exSourceId, { type: 'geojson', data: exGeoJson });
+        
         map.addLayer({
           id: exLayerId,
           type: 'fill',
           source: exSourceId,
           paint: { 'fill-color': T.red, 'fill-opacity': 0.3 },
         });
+        
         map.addLayer({
           id: `${exLayerId}-outline`,
           type: 'line',
           source: exSourceId,
-          paint: { 'line-color': T.red, 'line-width': 1.5, 'line-dasharray': [4, 3] },
+          paint: { 
+            'line-color': T.red, 
+            'line-width': 1.5, 
+            'line-dasharray': [4, 3] 
+          },
         });
 
         exLayers.current.set(ex._id, { layerId: exLayerId, sourceId: exSourceId });
@@ -655,6 +750,32 @@ export default function ServiceAreaManagement() {
         (map as any)._samClickHandler = null;
       }
       map.getCanvas().style.cursor = '';
+
+      // Remove draw preview layers
+      try {
+        if (map.getLayer('draw-preview-outline')) {
+          map.removeLayer('draw-preview-outline');
+        }
+        if (map.getLayer('draw-preview-fill')) {
+          map.removeLayer('draw-preview-fill');
+        }
+        if (map.getSource('draw-preview')) {
+          map.removeSource('draw-preview');
+        }
+      } catch {}
+
+      // Remove edit zone layers
+      try {
+        if (map.getLayer('edit-zone-outline')) {
+          map.removeLayer('edit-zone-outline');
+        }
+        if (map.getLayer('edit-zone-fill')) {
+          map.removeLayer('edit-zone-fill');
+        }
+        if (map.getSource('edit-zone')) {
+          map.removeSource('edit-zone');
+        }
+      } catch {}
     }
 
     // Remove custom markers
@@ -669,33 +790,6 @@ export default function ServiceAreaManagement() {
     }
 
     drawnPts.current = [];
-  }, []);
-
-  const startCustomDraw = useCallback((color: string) => {
-    const map = mapInst.current;
-    if (!map) return;
-    map.getCanvas().style.cursor = 'crosshair';
-
-    const onMapClick = (e: any) => {
-      const cur = modeRef.current;
-      if (cur.tag !== 'draw_new' && cur.tag !== 'draw_exclusion') return;
-
-      const { lng, lat } = e.lngLat;
-
-      const el = makeMarkerEl(color, String(customMarkers.current.length + 1), 24);
-      const marker = new OlaMaps.Marker({ element: el, draggable: true })
-        .setLngLat([lng, lat])
-        .addTo(map);
-
-      customMarkers.current.push(marker);
-      setLivePointCount(customMarkers.current.length);
-
-      // Update polygon preview
-      updatePolygonPreview(color);
-    };
-
-    (map as any)._samClickHandler = onMapClick;
-    map.on('click', onMapClick);
   }, []);
 
   const updatePolygonPreview = useCallback((color: string) => {
@@ -739,6 +833,38 @@ export default function ServiceAreaManagement() {
     }
   }, []);
 
+  const startCustomDraw = useCallback((color: string) => {
+    const map = mapInst.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = 'crosshair';
+
+    const onMapClick = (e: any) => {
+      const cur = modeRef.current;
+      if (cur.tag !== 'draw_new' && cur.tag !== 'draw_exclusion') return;
+
+      const { lng, lat } = e.lngLat;
+
+      const el = makeMarkerEl(color, String(customMarkers.current.length + 1), 24);
+      const marker = new OlaMaps.Marker({ element: el, draggable: true })
+        .setLngLat([lng, lat])
+        .addTo(map);
+
+      // Update preview when dragged
+      marker.on('dragend', () => {
+        updatePolygonPreview(color);
+      });
+
+      customMarkers.current.push(marker);
+      setLivePointCount(customMarkers.current.length);
+
+      // Update polygon preview
+      updatePolygonPreview(color);
+    };
+
+    (map as any)._samClickHandler = onMapClick;
+    map.on('click', onMapClick);
+  }, [updatePolygonPreview]);
+
   const finishCustomDraw = useCallback(() => {
     if (customMarkers.current.length < 3) {
       alert('Place at least 3 points first.');
@@ -758,7 +884,8 @@ export default function ServiceAreaManagement() {
     const last = customMarkers.current.pop();
     if (last && map) last.remove();
     setLivePointCount(customMarkers.current.length);
-    updatePolygonPreview(modeRef.current.tag === 'draw_exclusion' ? T.red : T.teal);
+    const color = modeRef.current.tag === 'draw_exclusion' ? T.red : T.teal;
+    updatePolygonPreview(color);
   }, [updatePolygonPreview]);
 
   const startDrawNewMode = useCallback((color: string) => {
@@ -772,7 +899,7 @@ export default function ServiceAreaManagement() {
     // Fit to zone
     const coords = zone.polygon.map(c => [c.lng, c.lat]);
     if (coords.length) {
-      const bounds = coords.reduce((b, c) => b.extend(c), new OlaMaps.LngLatBounds(coords[0], coords[0]));
+      const bounds = coords.reduce((b: any, c: any) => b.extend(c), new OlaMaps.LngLatBounds(coords[0], coords[0]));
       mapInst.current?.fitBounds(bounds, { padding: 60 });
     }
 
@@ -797,9 +924,11 @@ export default function ServiceAreaManagement() {
     if (!map) return;
 
     if (map.getSource('edit-zone')) {
-      map.removeLayer('edit-zone-fill');
-      map.removeLayer('edit-zone-outline');
-      map.removeSource('edit-zone');
+      try {
+        if (map.getLayer('edit-zone-outline')) map.removeLayer('edit-zone-outline');
+        if (map.getLayer('edit-zone-fill')) map.removeLayer('edit-zone-fill');
+        map.removeSource('edit-zone');
+      } catch {}
     }
 
     map.addSource('edit-zone', { type: 'geojson', data: geojson });
