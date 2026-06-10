@@ -39,6 +39,7 @@ interface CouponStats {
 interface AppSettings {
   welcomeCoupon: {
     enabled: boolean;
+    useFixedWelcomeAmount?: boolean;
     discountAmount: number;
     fareAdjustment: number;
     vehicleType?: string;
@@ -52,15 +53,13 @@ interface AppSettings {
     conversionRate: number;
     maxDiscountPerRide: number;
     coinsRequiredForMaxDiscount: number;
-    // Admin-controlled bonus tiers
     distanceBonuses: { label: string; maxKm: number | null; bonus: number }[];
     vehicleBonuses: { bike: number; auto: number; car: number; premium: number; xl: number };
     randomBonusCoins: number;
-    randomBonusChance: number; // 0–1
+    randomBonusChance: number;
   };
   referral: {
     enabled: boolean;
-    // ── Cycle-based fields (new) ────────────────────────────────────────────
     baseReferralsRequired: number;
     extraReferralsPerCycle: number;
     baseCouponAmount: number;
@@ -69,7 +68,6 @@ interface AppSettings {
     extraCoinsReward: number;
     maxReferralCycles: number;
     rewardCouponValidityDays: number;
-    // ── Legacy / display fields (kept for backwards compat) ─────────────────
     referralsRequired: number;
     rewardCouponAmount: number;
     rewardCoins: number;
@@ -114,15 +112,34 @@ interface ReferralRecord {
   createdAt: string;
 }
 
+interface WelcomeStats {
+  totalEligible: number;
+  totalUsed: number;
+  totalPending: number;
+  totalSavingsGiven: number;
+}
+
+interface CoinStats {
+  totalUsersWithCoins: number;
+  totalCoinsInCirculation: number;
+  totalCoinsEverEarned: number;
+  totalCoinsEverRedeemed: number;
+  totalTransactions: number;
+  usersEligibleForDiscount: number;
+  coinsRequired: number;
+  discountAmount: number;
+  coinsEnabled: boolean;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const VEHICLE_OPTIONS = [
-  { value: 'all', label: 'All Vehicles', icon: '🚗', color: 'blue' },
-  { value: 'bike', label: 'Bike', icon: '🏍️', color: 'green' },
-  { value: 'auto', label: 'Auto', icon: '🛺', color: 'yellow' },
-  { value: 'car', label: 'Car', icon: '🚙', color: 'purple' },
-  { value: 'premium', label: 'Premium', icon: '🚘', color: 'indigo' },
-  { value: 'xl', label: 'XL', icon: '🚐', color: 'pink' },
+  { value: 'all',     label: 'All Vehicles', icon: '🚗',  color: 'blue'   },
+  { value: 'bike',    label: 'Bike',         icon: '🏍️',  color: 'green'  },
+  { value: 'auto',    label: 'Auto',         icon: '🛺',  color: 'yellow' },
+  { value: 'car',     label: 'Car',          icon: '🚙',  color: 'purple' },
+  { value: 'premium', label: 'Premium',      icon: '🚘',  color: 'indigo' },
+  { value: 'xl',      label: 'XL',           icon: '🚐',  color: 'pink'   },
 ];
 
 const getApiBase = (): string => {
@@ -160,12 +177,12 @@ const getStatusBadge = (coupon: Coupon) => {
 
 const getVehicleBadges = (vehicles: string[]) => {
   const colorMap: Record<string, string> = {
-    green: 'bg-green-100 text-green-800 border-green-200',
+    green:  'bg-green-100 text-green-800 border-green-200',
     yellow: 'bg-yellow-100 text-yellow-800 border-yellow-200',
     purple: 'bg-purple-100 text-purple-800 border-purple-200',
     indigo: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-    pink: 'bg-pink-100 text-pink-800 border-pink-200',
-    blue: 'bg-blue-100 text-blue-800 border-blue-200',
+    pink:   'bg-pink-100 text-pink-800 border-pink-200',
+    blue:   'bg-blue-100 text-blue-800 border-blue-200',
   };
 
   if (!vehicles || vehicles.length === 0 || vehicles.includes('all')) {
@@ -193,13 +210,15 @@ const getVehicleBadges = (vehicles: string[]) => {
   );
 };
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
-const getVehicleLabel = (vehicleType?: string) => {
-  return VEHICLE_OPTIONS.find((o) => o.value === (vehicleType || 'all'))?.label || 'All Vehicles';
-};
+const getVehicleLabel = (vehicleType?: string) =>
+  VEHICLE_OPTIONS.find((o) => o.value === (vehicleType || 'all'))?.label || 'All Vehicles';
 
 const getWelcomeShownAmount = (welcomeCoupon: AppSettings['welcomeCoupon']) => {
+  // Fixed mode: show exactAmount directly
+  if (welcomeCoupon.useFixedWelcomeAmount) {
+    return welcomeCoupon.exactAmount || 25;
+  }
+  // Legacy mode: net saving or exactAmount override
   const netSaving = welcomeCoupon.discountAmount - welcomeCoupon.fareAdjustment;
   return welcomeCoupon.exactAmount && welcomeCoupon.exactAmount > 0
     ? welcomeCoupon.exactAmount
@@ -208,9 +227,11 @@ const getWelcomeShownAmount = (welcomeCoupon: AppSettings['welcomeCoupon']) => {
 
 type Tab = 'coupons' | 'reward-config' | 'referrals';
 
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 const CouponsManagement: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<Tab>('coupons');
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [activeTab, setActiveTab]   = useState<Tab>('coupons');
+  const [message, setMessage]       = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     if (message) {
@@ -246,9 +267,9 @@ const CouponsManagement: React.FC = () => {
       <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit">
         {(
           [
-            { id: 'coupons', label: '🎫 Coupons' },
+            { id: 'coupons',       label: '🎫 Coupons'       },
             { id: 'reward-config', label: '⚙️ Reward Config' },
-            { id: 'referrals', label: '👥 Referrals' },
+            { id: 'referrals',     label: '👥 Referrals'     },
           ] as { id: Tab; label: string }[]
         ).map((tab) => (
           <button
@@ -266,9 +287,9 @@ const CouponsManagement: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'coupons' && <CouponsTab setMessage={setMessage} />}
+      {activeTab === 'coupons'       && <CouponsTab setMessage={setMessage} />}
       {activeTab === 'reward-config' && <RewardConfigTab setMessage={setMessage} />}
-      {activeTab === 'referrals' && <ReferralsTab />}
+      {activeTab === 'referrals'     && <ReferralsTab />}
 
       <div className="mt-8 text-center text-gray-400 text-xs">
         🎫 Rewards Management System • API: {API_BASE}
@@ -277,14 +298,14 @@ const CouponsManagement: React.FC = () => {
   );
 };
 
-// ─── Coupons Tab (unchanged logic, same as original) ─────────────────────────
+// ─── Coupons Tab ──────────────────────────────────────────────────────────────
 
 const CouponsTab: React.FC<{
   setMessage: (m: { type: 'success' | 'error'; text: string } | null) => void;
 }> = ({ setMessage }) => {
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [stats, setStats] = useState<CouponStats | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [coupons, setCoupons]             = useState<Coupon[]>([]);
+  const [stats, setStats]                 = useState<CouponStats | null>(null);
+  const [loading, setLoading]             = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
 
@@ -311,10 +332,7 @@ const CouponsTab: React.FC<{
 
   const [formData, setFormData] = useState(defaultForm);
 
-  useEffect(() => {
-    fetchCoupons();
-    fetchStats();
-  }, []);
+  useEffect(() => { fetchCoupons(); fetchStats(); }, []);
 
   const fetchCoupons = async () => {
     setLoading(true);
@@ -324,9 +342,7 @@ const CouponsTab: React.FC<{
       else setMessage({ type: 'error', text: res.data.error || 'Failed to load coupons' });
     } catch (e: any) {
       setMessage({ type: 'error', text: e.response?.data?.error || 'Failed to load coupons' });
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const fetchStats = async () => {
@@ -336,7 +352,9 @@ const CouponsTab: React.FC<{
     } catch {}
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => {
     const { name, value, type } = e.target;
     if (type === 'checkbox') {
       setFormData({ ...formData, [name]: (e.target as HTMLInputElement).checked });
@@ -371,32 +389,33 @@ const CouponsTab: React.FC<{
   };
 
   const validate = () => {
-    if (!formData.code.trim()) { setMessage({ type: 'error', text: 'Coupon code is required' }); return false; }
-    if (!formData.description.trim()) { setMessage({ type: 'error', text: 'Description is required' }); return false; }
-    if (!formData.discountValue || formData.discountValue <= 0) { setMessage({ type: 'error', text: 'Discount value must be > 0' }); return false; }
-    if (!formData.validUntil) { setMessage({ type: 'error', text: 'Valid until is required' }); return false; }
+    if (!formData.code.trim())        { setMessage({ type: 'error', text: 'Coupon code is required'     }); return false; }
+    if (!formData.description.trim()) { setMessage({ type: 'error', text: 'Description is required'     }); return false; }
+    if (!formData.discountValue || formData.discountValue <= 0)
+                                      { setMessage({ type: 'error', text: 'Discount value must be > 0'  }); return false; }
+    if (!formData.validUntil)         { setMessage({ type: 'error', text: 'Valid until is required'     }); return false; }
     return true;
   };
 
   const buildPayload = () => ({
-    code: formData.code.toUpperCase().trim(),
-    description: formData.description.trim(),
-    discountType: formData.discountType,
-    discountValue: Number(formData.discountValue),
-    maxDiscountAmount: formData.maxDiscountAmount ? Number(formData.maxDiscountAmount) : null,
-    minFareAmount: Number(formData.minFareAmount) || 0,
-    applicableVehicles: formData.applicableVehicles,
-    applicableFor: formData.applicableFor,
-    rideNumber: formData.rideNumber ? Number(formData.rideNumber) : null,
+    code:                formData.code.toUpperCase().trim(),
+    description:         formData.description.trim(),
+    discountType:        formData.discountType,
+    discountValue:       Number(formData.discountValue),
+    maxDiscountAmount:   formData.maxDiscountAmount ? Number(formData.maxDiscountAmount) : null,
+    minFareAmount:       Number(formData.minFareAmount) || 0,
+    applicableVehicles:  formData.applicableVehicles,
+    applicableFor:       formData.applicableFor,
+    rideNumber:          formData.rideNumber ? Number(formData.rideNumber) : null,
     specificRideNumbers: formData.specificRideNumbers,
-    maxUsagePerUser: Number(formData.maxUsagePerUser) || 1,
-    totalUsageLimit: formData.totalUsageLimit ? Number(formData.totalUsageLimit) : null,
-    validFrom: formData.validFrom,
-    validUntil: formData.validUntil,
-    isActive: formData.isActive,
-    eligibleUserTypes: formData.eligibleUserTypes,
-    minRidesCompleted: Number(formData.minRidesCompleted) || 0,
-    maxRidesCompleted: formData.maxRidesCompleted ? Number(formData.maxRidesCompleted) : null,
+    maxUsagePerUser:     Number(formData.maxUsagePerUser) || 1,
+    totalUsageLimit:     formData.totalUsageLimit ? Number(formData.totalUsageLimit) : null,
+    validFrom:           formData.validFrom,
+    validUntil:          formData.validUntil,
+    isActive:            formData.isActive,
+    eligibleUserTypes:   formData.eligibleUserTypes,
+    minRidesCompleted:   Number(formData.minRidesCompleted) || 0,
+    maxRidesCompleted:   formData.maxRidesCompleted ? Number(formData.maxRidesCompleted) : null,
   });
 
   const handleCreateCoupon = async () => {
@@ -419,7 +438,11 @@ const CouponsTab: React.FC<{
     if (!editingCoupon || !validate()) return;
     setLoading(true);
     try {
-      const res = await axios.put(`${API_BASE}/api/admin/coupons/${editingCoupon._id}`, buildPayload(), getAxiosConfig());
+      const res = await axios.put(
+        `${API_BASE}/api/admin/coupons/${editingCoupon._id}`,
+        buildPayload(),
+        getAxiosConfig()
+      );
       if (res.data.success) {
         setMessage({ type: 'success', text: '✅ Coupon updated!' });
         setEditingCoupon(null); setShowCreateForm(false); setFormData(defaultForm);
@@ -442,32 +465,39 @@ const CouponsTab: React.FC<{
 
   const handleToggleStatus = async (coupon: Coupon) => {
     try {
-      const res = await axios.patch(`${API_BASE}/api/admin/coupons/${coupon._id}/toggle`, {}, getAxiosConfig());
-      if (res.data.success) { setMessage({ type: 'success', text: `✅ ${res.data.coupon.isActive ? 'Activated' : 'Deactivated'}!` }); fetchCoupons(); }
+      const res = await axios.patch(
+        `${API_BASE}/api/admin/coupons/${coupon._id}/toggle`,
+        {},
+        getAxiosConfig()
+      );
+      if (res.data.success) {
+        setMessage({ type: 'success', text: `✅ ${res.data.coupon.isActive ? 'Activated' : 'Deactivated'}!` });
+        fetchCoupons();
+      }
     } catch { setMessage({ type: 'error', text: 'Failed to toggle' }); }
   };
 
   const handleEditCoupon = (coupon: Coupon) => {
     setEditingCoupon(coupon);
     setFormData({
-      code: coupon.code,
-      description: coupon.description,
-      discountType: coupon.discountType,
-      discountValue: coupon.discountValue,
-      maxDiscountAmount: coupon.maxDiscountAmount,
-      minFareAmount: coupon.minFareAmount,
-      applicableVehicles: coupon.applicableVehicles?.length ? coupon.applicableVehicles : ['all'],
-      applicableFor: coupon.applicableFor,
-      rideNumber: coupon.rideNumber,
+      code:                coupon.code,
+      description:         coupon.description,
+      discountType:        coupon.discountType,
+      discountValue:       coupon.discountValue,
+      maxDiscountAmount:   coupon.maxDiscountAmount,
+      minFareAmount:       coupon.minFareAmount,
+      applicableVehicles:  coupon.applicableVehicles?.length ? coupon.applicableVehicles : ['all'],
+      applicableFor:       coupon.applicableFor,
+      rideNumber:          coupon.rideNumber,
       specificRideNumbers: coupon.specificRideNumbers || [],
-      maxUsagePerUser: coupon.maxUsagePerUser,
-      totalUsageLimit: coupon.totalUsageLimit,
-      validFrom: coupon.validFrom?.split('T')[0] || '',
-      validUntil: coupon.validUntil?.split('T')[0] || '',
-      isActive: coupon.isActive,
-      eligibleUserTypes: coupon.eligibleUserTypes || ['ALL'],
-      minRidesCompleted: coupon.minRidesCompleted || 0,
-      maxRidesCompleted: coupon.maxRidesCompleted,
+      maxUsagePerUser:     coupon.maxUsagePerUser,
+      totalUsageLimit:     coupon.totalUsageLimit,
+      validFrom:           coupon.validFrom?.split('T')[0] || '',
+      validUntil:          coupon.validUntil?.split('T')[0] || '',
+      isActive:            coupon.isActive,
+      eligibleUserTypes:   coupon.eligibleUserTypes || ['ALL'],
+      minRidesCompleted:   coupon.minRidesCompleted || 0,
+      maxRidesCompleted:   coupon.maxRidesCompleted,
     });
     setShowCreateForm(true);
   };
@@ -478,10 +508,10 @@ const CouponsTab: React.FC<{
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           {[
-            { label: 'Total', value: stats.totalCoupons, icon: '🎫', color: 'orange' },
-            { label: 'Active', value: stats.activeCoupons, icon: '✅', color: 'green' },
-            { label: 'Expired', value: stats.expiredCoupons, icon: '⏰', color: 'gray' },
-            { label: 'Used', value: stats.totalUsages, icon: '📊', color: 'blue' },
+            { label: 'Total',          value: stats.totalCoupons,                          icon: '🎫', color: 'orange' },
+            { label: 'Active',         value: stats.activeCoupons,                         icon: '✅', color: 'green'  },
+            { label: 'Expired',        value: stats.expiredCoupons,                        icon: '⏰', color: 'gray'   },
+            { label: 'Used',           value: stats.totalUsages,                           icon: '📊', color: 'blue'   },
             { label: 'Discount Given', value: `₹${stats.totalDiscountGiven?.toFixed(0) || 0}`, icon: '💰', color: 'purple' },
           ].map((s) => (
             <div key={s.label} className="bg-white rounded-xl p-4 border shadow-sm">
@@ -503,14 +533,18 @@ const CouponsTab: React.FC<{
         </button>
       </div>
 
-      {/* Create/Edit Form */}
+      {/* Create / Edit Form */}
       {showCreateForm && (
         <div className="bg-white rounded-2xl shadow-lg p-6 border">
-          <h2 className="text-xl font-bold mb-6">{editingCoupon ? '✏️ Edit Coupon' : '➕ Create New Coupon'}</h2>
+          <h2 className="text-xl font-bold mb-6">
+            {editingCoupon ? '✏️ Edit Coupon' : '➕ Create New Coupon'}
+          </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Code */}
             <div>
-              <label className="block text-sm font-medium mb-1">Code <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium mb-1">
+                Code <span className="text-red-500">*</span>
+              </label>
               <input
                 name="code" value={formData.code}
                 onChange={handleInputChange}
@@ -522,7 +556,9 @@ const CouponsTab: React.FC<{
 
             {/* Description */}
             <div>
-              <label className="block text-sm font-medium mb-1">Description <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium mb-1">
+                Description <span className="text-red-500">*</span>
+              </label>
               <input
                 name="description" value={formData.description}
                 onChange={handleInputChange}
@@ -534,7 +570,11 @@ const CouponsTab: React.FC<{
             {/* Discount Type */}
             <div>
               <label className="block text-sm font-medium mb-1">Discount Type</label>
-              <select name="discountType" value={formData.discountType} onChange={handleInputChange} className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500">
+              <select
+                name="discountType" value={formData.discountType}
+                onChange={handleInputChange}
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              >
                 <option value="FIXED">Fixed (₹)</option>
                 <option value="PERCENTAGE">Percentage (%)</option>
               </select>
@@ -542,22 +582,36 @@ const CouponsTab: React.FC<{
 
             {/* Discount Value */}
             <div>
-              <label className="block text-sm font-medium mb-1">Discount Value <span className="text-red-500">*</span></label>
-              <input type="number" name="discountValue" value={formData.discountValue || ''} onChange={handleInputChange} min="0" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <label className="block text-sm font-medium mb-1">
+                Discount Value <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number" name="discountValue" value={formData.discountValue || ''}
+                onChange={handleInputChange} min="0"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
-            {/* Max Discount (% only) */}
+            {/* Max Discount — percentage only */}
             {formData.discountType === 'PERCENTAGE' && (
               <div>
                 <label className="block text-sm font-medium mb-1">Max Discount Amount (₹)</label>
-                <input type="number" name="maxDiscountAmount" value={formData.maxDiscountAmount || ''} onChange={handleInputChange} min="0" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+                <input
+                  type="number" name="maxDiscountAmount" value={formData.maxDiscountAmount || ''}
+                  onChange={handleInputChange} min="0"
+                  className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+                />
               </div>
             )}
 
             {/* Min Fare */}
             <div>
               <label className="block text-sm font-medium mb-1">Minimum Fare (₹)</label>
-              <input type="number" name="minFareAmount" value={formData.minFareAmount || ''} onChange={handleInputChange} min="0" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <input
+                type="number" name="minFareAmount" value={formData.minFareAmount || ''}
+                onChange={handleInputChange} min="0"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             {/* Vehicle Types */}
@@ -566,8 +620,7 @@ const CouponsTab: React.FC<{
               <div className="flex flex-wrap gap-2">
                 {VEHICLE_OPTIONS.map((v) => (
                   <button
-                    key={v.value}
-                    type="button"
+                    key={v.value} type="button"
                     onClick={() => handleVehicleChange(v.value)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
                       formData.applicableVehicles.includes(v.value)
@@ -577,19 +630,27 @@ const CouponsTab: React.FC<{
                   >
                     <span>{v.icon}</span>
                     <span>{v.label}</span>
-                    {formData.applicableVehicles.includes(v.value) && <span className="text-orange-500">✓</span>}
+                    {formData.applicableVehicles.includes(v.value) && (
+                      <span className="text-orange-500">✓</span>
+                    )}
                   </button>
                 ))}
               </div>
               {formData.applicableVehicles.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1">⚠️ No vehicles selected — coupon won't match any ride</p>
+                <p className="text-xs text-amber-600 mt-1">
+                  ⚠️ No vehicles selected — coupon won't match any ride
+                </p>
               )}
             </div>
 
             {/* Applicable For */}
             <div>
               <label className="block text-sm font-medium mb-1">Applicable For</label>
-              <select name="applicableFor" value={formData.applicableFor} onChange={handleInputChange} className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500">
+              <select
+                name="applicableFor" value={formData.applicableFor}
+                onChange={handleInputChange}
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              >
                 <option value="FIRST_RIDE">First Ride Only</option>
                 <option value="NTH_RIDE">Nth Ride</option>
                 <option value="EVERY_NTH_RIDE">Every Nth Ride</option>
@@ -602,18 +663,27 @@ const CouponsTab: React.FC<{
             {(formData.applicableFor === 'NTH_RIDE' || formData.applicableFor === 'EVERY_NTH_RIDE') && (
               <div>
                 <label className="block text-sm font-medium mb-1">Ride Number</label>
-                <input type="number" name="rideNumber" value={formData.rideNumber || ''} onChange={handleInputChange} min="1" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+                <input
+                  type="number" name="rideNumber" value={formData.rideNumber || ''}
+                  onChange={handleInputChange} min="1"
+                  className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+                />
               </div>
             )}
 
             {formData.applicableFor === 'SPECIFIC_RIDES' && (
               <div>
-                <label className="block text-sm font-medium mb-1">Specific Ride Numbers (comma separated)</label>
+                <label className="block text-sm font-medium mb-1">
+                  Specific Ride Numbers (comma separated)
+                </label>
                 <input
                   type="text"
                   value={formData.specificRideNumbers.join(', ')}
                   onChange={(e) => {
-                    const nums = e.target.value.split(',').map((n) => parseInt(n.trim())).filter((n) => !isNaN(n));
+                    const nums = e.target.value
+                      .split(',')
+                      .map((n) => parseInt(n.trim()))
+                      .filter((n) => !isNaN(n));
                     setFormData({ ...formData, specificRideNumbers: nums });
                   }}
                   placeholder="e.g. 5, 10, 15"
@@ -625,12 +695,23 @@ const CouponsTab: React.FC<{
             {/* Usage limits */}
             <div>
               <label className="block text-sm font-medium mb-1">Max Uses Per User</label>
-              <input type="number" name="maxUsagePerUser" value={formData.maxUsagePerUser} onChange={handleInputChange} min="1" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <input
+                type="number" name="maxUsagePerUser" value={formData.maxUsagePerUser}
+                onChange={handleInputChange} min="1"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Total Usage Limit <span className="text-gray-400 text-xs">(blank = unlimited)</span></label>
-              <input type="number" name="totalUsageLimit" value={formData.totalUsageLimit || ''} onChange={handleInputChange} min="1" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <label className="block text-sm font-medium mb-1">
+                Total Usage Limit{' '}
+                <span className="text-gray-400 text-xs">(blank = unlimited)</span>
+              </label>
+              <input
+                type="number" name="totalUsageLimit" value={formData.totalUsageLimit || ''}
+                onChange={handleInputChange} min="1"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             {/* User type */}
@@ -639,8 +720,7 @@ const CouponsTab: React.FC<{
               <div className="flex gap-3">
                 {(['ALL', 'NEW', 'EXISTING'] as const).map((t) => (
                   <button
-                    key={t}
-                    type="button"
+                    key={t} type="button"
                     onClick={() => handleUserTypeChange(t)}
                     className={`px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
                       formData.eligibleUserTypes.includes(t)
@@ -654,40 +734,75 @@ const CouponsTab: React.FC<{
               </div>
             </div>
 
-            {/* Min / max rides */}
+            {/* Min / max rides completed */}
             <div>
               <label className="block text-sm font-medium mb-1">Min Rides Completed</label>
-              <input type="number" name="minRidesCompleted" value={formData.minRidesCompleted} onChange={handleInputChange} min="0" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <input
+                type="number" name="minRidesCompleted" value={formData.minRidesCompleted}
+                onChange={handleInputChange} min="0"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">Max Rides Completed <span className="text-gray-400 text-xs">(blank = no limit)</span></label>
-              <input type="number" name="maxRidesCompleted" value={formData.maxRidesCompleted || ''} onChange={handleInputChange} min="0" className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <label className="block text-sm font-medium mb-1">
+                Max Rides Completed{' '}
+                <span className="text-gray-400 text-xs">(blank = no limit)</span>
+              </label>
+              <input
+                type="number" name="maxRidesCompleted" value={formData.maxRidesCompleted || ''}
+                onChange={handleInputChange} min="0"
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             {/* Dates */}
             <div>
               <label className="block text-sm font-medium mb-1">Valid From</label>
-              <input type="date" name="validFrom" value={formData.validFrom} onChange={handleInputChange} className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <input
+                type="date" name="validFrom" value={formData.validFrom}
+                onChange={handleInputChange}
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Valid Until <span className="text-red-500">*</span></label>
-              <input type="date" name="validUntil" value={formData.validUntil} onChange={handleInputChange} className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500" />
+              <label className="block text-sm font-medium mb-1">
+                Valid Until <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date" name="validUntil" value={formData.validUntil}
+                onChange={handleInputChange}
+                className="border rounded w-full p-2 focus:ring-2 focus:ring-orange-500"
+              />
             </div>
 
             {/* Active toggle */}
             <div className="flex items-center gap-2">
-              <input type="checkbox" name="isActive" id="isActive" checked={formData.isActive} onChange={handleInputChange} className="w-5 h-5 text-orange-500 focus:ring-orange-500 rounded" />
-              <label htmlFor="isActive" className="text-sm font-medium cursor-pointer">Active (can be used immediately)</label>
+              <input
+                type="checkbox" name="isActive" id="isActive"
+                checked={formData.isActive} onChange={handleInputChange}
+                className="w-5 h-5 text-orange-500 focus:ring-orange-500 rounded"
+              />
+              <label htmlFor="isActive" className="text-sm font-medium cursor-pointer">
+                Active (can be used immediately)
+              </label>
             </div>
           </div>
 
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-            <button onClick={() => { setShowCreateForm(false); setEditingCoupon(null); setFormData(defaultForm); }} disabled={loading} className="bg-gray-200 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-300 disabled:opacity-50">
+            <button
+              onClick={() => { setShowCreateForm(false); setEditingCoupon(null); setFormData(defaultForm); }}
+              disabled={loading}
+              className="bg-gray-200 text-gray-700 px-5 py-2 rounded-lg hover:bg-gray-300 disabled:opacity-50"
+            >
               Cancel
             </button>
-            <button onClick={editingCoupon ? handleUpdateCoupon : handleCreateCoupon} disabled={loading} className="bg-orange-500 text-white px-6 py-2 rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2">
-              {loading && <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>}
+            <button
+              onClick={editingCoupon ? handleUpdateCoupon : handleCreateCoupon}
+              disabled={loading}
+              className="bg-orange-500 text-white px-6 py-2 rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading && <Spinner />}
               {editingCoupon ? '💾 Update Coupon' : '➕ Create Coupon'}
             </button>
           </div>
@@ -699,7 +814,7 @@ const CouponsTab: React.FC<{
         <h2 className="text-xl font-bold mb-4">All Coupons ({coupons.length})</h2>
         {loading && coupons.length === 0 ? (
           <div className="text-center py-12">
-            <svg className="animate-spin h-8 w-8 mx-auto text-orange-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+            <Spinner className="h-8 w-8 mx-auto text-orange-500" />
             <p className="mt-3 text-gray-500">Loading coupons...</p>
           </div>
         ) : coupons.length === 0 ? (
@@ -712,42 +827,74 @@ const CouponsTab: React.FC<{
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-gray-50 text-left">
-                  {['Code', 'Description', 'Discount', '🚗 Vehicles', 'Applicable', 'Usage', 'Valid Until', 'Status', 'Actions'].map((h) => (
-                    <th key={h} className="p-3 font-semibold text-gray-600">{h}</th>
-                  ))}
+                  {['Code','Description','Discount','🚗 Vehicles','Applicable','Usage','Valid Until','Status','Actions'].map(
+                    (h) => <th key={h} className="p-3 font-semibold text-gray-600">{h}</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {coupons.map((coupon) => (
                   <tr key={coupon._id} className="border-b hover:bg-gray-50 transition">
                     <td className="p-3">
-                      <span onClick={() => copyToClipboard(coupon.code)} className="font-mono font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded cursor-pointer hover:bg-orange-100" title="Click to copy">
+                      <span
+                        onClick={() => copyToClipboard(coupon.code)}
+                        className="font-mono font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded cursor-pointer hover:bg-orange-100"
+                        title="Click to copy"
+                      >
                         {coupon.code}
                       </span>
                     </td>
-                    <td className="p-3 max-w-xs truncate text-gray-600" title={coupon.description}>{coupon.description}</td>
+                    <td className="p-3 max-w-xs truncate text-gray-600" title={coupon.description}>
+                      {coupon.description}
+                    </td>
                     <td className="p-3">
-                      <span className="font-semibold">{coupon.discountType === 'PERCENTAGE' ? `${coupon.discountValue}%` : `₹${coupon.discountValue}`}</span>
-                      {coupon.maxDiscountAmount && <span className="text-xs text-gray-400 block">max ₹{coupon.maxDiscountAmount}</span>}
+                      <span className="font-semibold">
+                        {coupon.discountType === 'PERCENTAGE' ? `${coupon.discountValue}%` : `₹${coupon.discountValue}`}
+                      </span>
+                      {coupon.maxDiscountAmount && (
+                        <span className="text-xs text-gray-400 block">max ₹{coupon.maxDiscountAmount}</span>
+                      )}
                     </td>
                     <td className="p-3">{getVehicleBadges(coupon.applicableVehicles)}</td>
                     <td className="p-3 text-gray-600">
-                      {coupon.applicableFor === 'FIRST_RIDE' && '1st Ride'}
-                      {coupon.applicableFor === 'NTH_RIDE' && `Ride #${coupon.rideNumber}`}
-                      {coupon.applicableFor === 'EVERY_NTH_RIDE' && `Every ${coupon.rideNumber}th`}
+                      {coupon.applicableFor === 'FIRST_RIDE'    && '1st Ride'}
+                      {coupon.applicableFor === 'NTH_RIDE'      && `Ride #${coupon.rideNumber}`}
+                      {coupon.applicableFor === 'EVERY_NTH_RIDE'&& `Every ${coupon.rideNumber}th`}
                       {coupon.applicableFor === 'SPECIFIC_RIDES' && `Rides: ${coupon.specificRideNumbers?.join(', ')}`}
-                      {coupon.applicableFor === 'ALL_RIDES' && 'All Rides'}
+                      {coupon.applicableFor === 'ALL_RIDES'     && 'All Rides'}
                     </td>
-                    <td className="p-3 font-mono">{coupon.currentUsageCount || 0}{coupon.totalUsageLimit ? ` / ${coupon.totalUsageLimit}` : ''}</td>
-                    <td className="p-3 text-gray-600">{new Date(coupon.validUntil).toLocaleDateString()}</td>
+                    <td className="p-3 font-mono">
+                      {coupon.currentUsageCount || 0}
+                      {coupon.totalUsageLimit ? ` / ${coupon.totalUsageLimit}` : ''}
+                    </td>
+                    <td className="p-3 text-gray-600">
+                      {new Date(coupon.validUntil).toLocaleDateString()}
+                    </td>
                     <td className="p-3">{getStatusBadge(coupon)}</td>
                     <td className="p-3">
                       <div className="flex flex-wrap gap-1">
-                        <button onClick={() => handleToggleStatus(coupon)} className={`px-2 py-1 rounded text-xs font-medium ${coupon.isActive ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
+                        <button
+                          onClick={() => handleToggleStatus(coupon)}
+                          className={`px-2 py-1 rounded text-xs font-medium ${
+                            coupon.isActive
+                              ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                              : 'bg-green-100 text-green-700 hover:bg-green-200'
+                          }`}
+                        >
                           {coupon.isActive ? '⏸️ Pause' : '▶️ Activate'}
                         </button>
-                        <button onClick={() => handleEditCoupon(coupon)} className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200">✏️ Edit</button>
-                        <button onClick={() => handleDeleteCoupon(coupon)} className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200">🗑️ Delete</button>
+                        <button
+                          onClick={() => handleEditCoupon(coupon)}
+                          className="px-2 py-1 rounded text-xs font-medium bg-blue-100 text-blue-700 hover:bg-blue-200"
+                        >
+                          ✏️ Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCoupon(coupon)}
+                          className="px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700 hover:bg-red-200"
+                        >
+                          🗑️ Delete
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -761,35 +908,25 @@ const CouponsTab: React.FC<{
   );
 };
 
+// ─── Shared micro-components ──────────────────────────────────────────────────
+
+const Spinner: React.FC<{ className?: string }> = ({ className = 'h-4 w-4' }) => (
+  <svg className={`animate-spin ${className}`} viewBox="0 0 24 24">
+    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+  </svg>
+);
+
 // ─── Reward Config Tab ────────────────────────────────────────────────────────
-
-interface WelcomeStats {
-  totalEligible: number;
-  totalUsed: number;
-  totalPending: number;
-  totalSavingsGiven: number;
-}
-
-interface CoinStats {
-  totalUsersWithCoins: number;
-  totalCoinsInCirculation: number;
-  totalCoinsEverEarned: number;
-  totalCoinsEverRedeemed: number;
-  totalTransactions: number;
-  usersEligibleForDiscount: number;
-  coinsRequired: number;
-  discountAmount: number;
-  coinsEnabled: boolean;
-}
 
 const RewardConfigTab: React.FC<{
   setMessage: (m: { type: 'success' | 'error'; text: string } | null) => void;
 }> = ({ setMessage }) => {
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [settings, setSettings]       = useState<AppSettings | null>(null);
+  const [loading, setLoading]         = useState(false);
+  const [saving, setSaving]           = useState(false);
   const [welcomeStats, setWelcomeStats] = useState<WelcomeStats | null>(null);
-  const [coinStats, setCoinStats] = useState<CoinStats | null>(null);
+  const [coinStats, setCoinStats]     = useState<CoinStats | null>(null);
 
   useEffect(() => { fetchSettings(); fetchWelcomeStats(); fetchCoinStats(); }, []);
 
@@ -797,14 +934,14 @@ const RewardConfigTab: React.FC<{
     try {
       const res = await axios.get(`${API_BASE}/api/rewards/stats`, getAxiosConfig());
       if (res.data.success) setCoinStats(res.data.stats);
-    } catch { /* non-critical */ }
+    } catch {}
   };
 
   const fetchWelcomeStats = async () => {
     try {
       const res = await axios.get(`${API_BASE}/api/coupons/welcome-stats`, getAxiosConfig());
       if (res.data.success) setWelcomeStats(res.data.stats);
-    } catch { /* non-critical — silently skip if endpoint not yet live */ }
+    } catch {}
   };
 
   const fetchSettings = async () => {
@@ -821,8 +958,10 @@ const RewardConfigTab: React.FC<{
     setSaving(true);
     try {
       const res = await axios.put(`${API_BASE}/api/admin/reward-config`, settings, getAxiosConfig());
-      if (res.data.success) { setMessage({ type: 'success', text: '✅ Reward config saved!' }); setSettings(res.data.settings); }
-      else setMessage({ type: 'error', text: res.data.error || 'Failed' });
+      if (res.data.success) {
+        setMessage({ type: 'success', text: '✅ Reward config saved!' });
+        setSettings(res.data.settings);
+      } else setMessage({ type: 'error', text: res.data.error || 'Failed' });
     } catch (e: any) {
       setMessage({ type: 'error', text: e.response?.data?.error || 'Failed to save' });
     } finally { setSaving(false); }
@@ -830,48 +969,45 @@ const RewardConfigTab: React.FC<{
 
   const update = (section: keyof AppSettings, key: string, value: any) => {
     if (!settings) return;
-    setSettings({ ...settings, [section]: { ...settings[section], [key]: value } });
+    setSettings({ ...settings, [section]: { ...(settings[section] as any), [key]: value } });
   };
 
-  const getDriverReferral = () => {
-    return {
-      enabled: settings?.driverReferral?.enabled ?? false,
-      referralsRequired:
-        settings?.driverReferral?.referralsRequired ??
-        (settings?.driverReferral as any)?.baseReferralsRequired ??
-        1,
-      ridesToComplete: settings?.driverReferral?.ridesToComplete ?? 1,
-      rewardAmount:
-        settings?.driverReferral?.rewardAmount ??
-        (settings?.driverReferral as any)?.baseRewardAmount ??
-        100,
-    };
-  };
+  const getDriverReferral = () => ({
+    enabled:            settings?.driverReferral?.enabled           ?? false,
+    referralsRequired:  settings?.driverReferral?.referralsRequired  ?? 1,
+    ridesToComplete:    settings?.driverReferral?.ridesToComplete     ?? 1,
+    rewardAmount:       settings?.driverReferral?.rewardAmount        ?? 100,
+  });
 
   const updateDriverReferral = (key: string, value: any) => {
     if (!settings) return;
-    setSettings({
-      ...settings,
-      driverReferral: {
-        ...getDriverReferral(),
-        [key]: value,
-      },
-    });
+    setSettings({ ...settings, driverReferral: { ...getDriverReferral(), [key]: value } });
   };
 
   if (loading) return (
     <div className="text-center py-16">
-      <svg className="animate-spin h-8 w-8 mx-auto text-orange-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+      <Spinner className="h-8 w-8 mx-auto text-orange-500" />
       <p className="mt-3 text-gray-500">Loading config...</p>
     </div>
   );
   if (!settings) return null;
 
-  const welcomeShownAmount = getWelcomeShownAmount(settings.welcomeCoupon);
-  const welcomeNetSaving = settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment;
-  const welcomeVehicleType = settings.welcomeCoupon.vehicleType || 'all';
+  // ── Derived display values ─────────────────────────────────────────────────
+  const welcomeVehicleType  = settings.welcomeCoupon.vehicleType || 'all';
+  const isFixedMode         = settings.welcomeCoupon.useFixedWelcomeAmount === true;
+  const fixedAmount         = settings.welcomeCoupon.exactAmount || 25;
+  const welcomeShownAmount  = getWelcomeShownAmount(settings.welcomeCoupon);
+  const welcomeNetSaving    = settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment;
+  const legacyInvalid       =
+    !isFixedMode &&
+    settings.welcomeCoupon.fareAdjustment >= settings.welcomeCoupon.discountAmount;
 
-  const SectionCard = ({ icon, title, subtitle, children }: { icon: string; title: string; subtitle: string; children: React.ReactNode }) => (
+  // ── Sub-components scoped to this tab ─────────────────────────────────────
+  const SectionCard = ({
+    icon, title, subtitle, children,
+  }: {
+    icon: string; title: string; subtitle: string; children: React.ReactNode;
+  }) => (
     <div className="bg-white rounded-2xl border shadow-sm p-6">
       <div className="flex items-center gap-3 mb-5">
         <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-xl">{icon}</div>
@@ -884,7 +1020,11 @@ const RewardConfigTab: React.FC<{
     </div>
   );
 
-  const Field = ({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) => (
+  const Field = ({
+    label, hint, children,
+  }: {
+    label: string; hint?: string; children: React.ReactNode;
+  }) => (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
       {hint && <p className="text-xs text-gray-400 mb-1">{hint}</p>}
@@ -892,26 +1032,36 @@ const RewardConfigTab: React.FC<{
     </div>
   );
 
-  const NumInput = ({ value, onChange, min, step, max }: { value: number; onChange: (v: number) => void; min?: number; step?: number; max?: number }) => (
-      <input
-        type="number"
-        value={value}
-        min={min ?? 0}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-      />
-    );
+  const NumInput = ({
+    value, onChange, min, step, max,
+  }: {
+    value: number; onChange: (v: number) => void; min?: number; step?: number; max?: number;
+  }) => (
+    <input
+      type="number" value={value} min={min ?? 0} max={max} step={step}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+    />
+  );
 
-  const Toggle = ({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
+  const Toggle = ({
+    checked, onChange, label,
+  }: {
+    checked: boolean; onChange: (v: boolean) => void; label: string;
+  }) => (
     <div className="flex items-center justify-between py-2">
       <span className="text-sm text-gray-700">{label}</span>
       <button
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-orange-500' : 'bg-gray-200'}`}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+          checked ? 'bg-orange-500' : 'bg-gray-200'
+        }`}
       >
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+            checked ? 'translate-x-6' : 'translate-x-1'
+          }`}
+        />
       </button>
     </div>
   );
@@ -920,7 +1070,7 @@ const RewardConfigTab: React.FC<{
     <div className="space-y-6">
 
       {/* 🎁 Welcome Coupon Live Stats */}
-      {settings?.welcomeCoupon.enabled && welcomeStats && (
+      {settings.welcomeCoupon.enabled && welcomeStats && (
         <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">🎁</span>
@@ -934,10 +1084,10 @@ const RewardConfigTab: React.FC<{
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: 'Eligible Users', value: welcomeStats.totalEligible, icon: '👥' },
-              { label: 'Used', value: welcomeStats.totalUsed, icon: '✅' },
-              { label: 'Pending', value: welcomeStats.totalPending, icon: '⏳' },
-              { label: 'Total Savings Given', value: `₹${welcomeStats.totalSavingsGiven ?? 0}`, icon: '💰' },
+              { label: 'Eligible Users',      value: welcomeStats.totalEligible,                 icon: '👥' },
+              { label: 'Used',                value: welcomeStats.totalUsed,                     icon: '✅' },
+              { label: 'Pending',             value: welcomeStats.totalPending,                  icon: '⏳' },
+              { label: 'Total Savings Given', value: `₹${welcomeStats.totalSavingsGiven ?? 0}`,  icon: '💰' },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-xl p-3 border border-orange-100 text-center">
                 <div className="text-xl mb-1">{s.icon}</div>
@@ -946,24 +1096,40 @@ const RewardConfigTab: React.FC<{
               </div>
             ))}
           </div>
+
+          {/* Stats footer — mode-aware */}
           <p className="text-xs text-orange-600 mt-3">
-            Code: <strong>{settings.welcomeCoupon.code}</strong> &nbsp;·&nbsp;
-            Discount: <strong>₹{settings.welcomeCoupon.discountAmount}</strong> &nbsp;·&nbsp;
-            Internal markup: <strong>₹{settings.welcomeCoupon.fareAdjustment}</strong> &nbsp;·&nbsp;
-            Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong> &nbsp;Â·&nbsp;
-            Exact shown: <strong>&#8377;{welcomeShownAmount}</strong> &nbsp;Â·&nbsp;
-            Net saving to customer:{' '}
-            <strong style={{ color: settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment <= 0 ? '#dc2626' : 'inherit' }}>
-              ₹{settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment}
-              {settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment <= 0 ? ' ⚠️ FIX THIS!' : ''}
-            </strong> &nbsp;·&nbsp;
+            Code: <strong>{settings.welcomeCoupon.code}</strong>
+            &nbsp;·&nbsp;
+            {isFixedMode ? (
+              <>
+                Mode: <strong>Fixed Amount</strong>
+                &nbsp;·&nbsp;
+                Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong>
+                &nbsp;·&nbsp;
+                Customer pays: <strong>₹{fixedAmount}</strong>
+                &nbsp;·&nbsp;
+                Discount auto-calculated from base fare
+              </>
+            ) : (
+              <>
+                Discount: <strong>₹{settings.welcomeCoupon.discountAmount}</strong>
+                &nbsp;·&nbsp;
+                Internal markup: <strong>₹{settings.welcomeCoupon.fareAdjustment}</strong>
+                &nbsp;·&nbsp;
+                Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong>
+                &nbsp;·&nbsp;
+                Net saving: <strong>₹{welcomeNetSaving}</strong>
+              </>
+            )}
+            &nbsp;·&nbsp;
             Valid for: <strong>{settings.welcomeCoupon.validityDays} days</strong> after sign-up
           </p>
         </div>
       )}
 
       {/* 🪙 Coin System Live Stats */}
-      {settings?.coins.enabled && coinStats && (
+      {settings.coins.enabled && coinStats && (
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">🪙</span>
@@ -977,10 +1143,10 @@ const RewardConfigTab: React.FC<{
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             {[
-              { label: 'Users with Coins', value: coinStats.totalUsersWithCoins, icon: '👥' },
-              { label: 'Coins in Circulation', value: coinStats.totalCoinsInCirculation.toLocaleString(), icon: '🪙' },
-              { label: 'Ever Earned', value: coinStats.totalCoinsEverEarned.toLocaleString(), icon: '📈' },
-              { label: 'Ever Redeemed', value: coinStats.totalCoinsEverRedeemed.toLocaleString(), icon: '💳' },
+              { label: 'Users with Coins',    value: coinStats.totalUsersWithCoins,                         icon: '👥' },
+              { label: 'Coins in Circulation',value: coinStats.totalCoinsInCirculation.toLocaleString(),    icon: '🪙' },
+              { label: 'Ever Earned',         value: coinStats.totalCoinsEverEarned.toLocaleString(),       icon: '📈' },
+              { label: 'Ever Redeemed',       value: coinStats.totalCoinsEverRedeemed.toLocaleString(),     icon: '💳' },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-xl p-3 border border-blue-100 text-center">
                 <div className="text-xl mb-1">{s.icon}</div>
@@ -991,133 +1157,282 @@ const RewardConfigTab: React.FC<{
           </div>
           <div className="flex flex-wrap gap-3 items-center text-xs text-blue-700">
             <span>
-              🎯 <strong>{coinStats.usersEligibleForDiscount}</strong> users eligible for ₹{coinStats.discountAmount} discount
-              ({coinStats.coinsRequired} coins required)
+              🎯 <strong>{coinStats.usersEligibleForDiscount}</strong> users eligible for
+              ₹{coinStats.discountAmount} discount ({coinStats.coinsRequired} coins required)
             </span>
             <span>·</span>
             <span>📊 <strong>{coinStats.totalTransactions}</strong> total transactions</span>
             <span>·</span>
             <span>
-              💰 ₹{(coinStats.totalCoinsEverRedeemed * (settings?.coins.conversionRate ?? 0.10)).toFixed(0)} total discounts given
+              💰 ₹{(coinStats.totalCoinsEverRedeemed * (settings.coins.conversionRate ?? 0.10)).toFixed(0)} total discounts given
             </span>
           </div>
         </div>
       )}
-      {settings && !settings.coins.enabled && (
+
+      {/* Disabled state banners */}
+      {!settings.coins.enabled && (
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex items-center gap-3 text-sm text-gray-500">
           <span className="text-xl">🪙</span>
           <span>Coin system is currently <strong>disabled</strong>. Enable it in the config below.</span>
         </div>
       )}
-
-      {/* Disabled notice */}
-      {settings && !settings.welcomeCoupon.enabled && (
+      {!settings.welcomeCoupon.enabled && (
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex items-center gap-3 text-sm text-gray-500">
           <span className="text-xl">🎁</span>
-          <span>Welcome coupon is currently <strong>disabled</strong>. Enable it in the config below to start giving first-ride discounts.</span>
+          <span>
+            Welcome coupon is currently <strong>disabled</strong>. Enable it in the config below
+            to start giving first-ride discounts.
+          </span>
         </div>
       )}
 
-      {/* ── Welcome Coupon + Referral — side by side (unchanged) ── */}
+      {/* ── Welcome Coupon + Referral — side by side ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Welcome Coupon */}
-        <SectionCard icon="🎁" title="Welcome Coupon" subtitle="Auto-assigned to every new customer">
-          <Toggle checked={settings.welcomeCoupon.enabled} onChange={(v) => update('welcomeCoupon', 'enabled', v)} label="Enable welcome coupon" />
+
+        {/* ✅ Welcome Coupon Section — fully updated */}
+        <SectionCard
+          icon="🎁"
+          title="Welcome Coupon"
+          subtitle="Auto-assigned to every new customer"
+        >
+          {/* Enable / disable */}
+          <Toggle
+            checked={settings.welcomeCoupon.enabled}
+            onChange={(v) => update('welcomeCoupon', 'enabled', v)}
+            label="Enable welcome coupon"
+          />
+
+          {/* Coupon code */}
           <Field label="Coupon Code">
-            <input value={settings.welcomeCoupon.code} onChange={(e) => update('welcomeCoupon', 'code', e.target.value.toUpperCase())} className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 uppercase font-mono" />
+            <input
+              value={settings.welcomeCoupon.code}
+              onChange={(e) => update('welcomeCoupon', 'code', e.target.value.toUpperCase())}
+              className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 uppercase font-mono"
+            />
           </Field>
-          <Field label="Vehicle Type" hint="Welcome coupon will show and apply only for this vehicle">
-            <select
-              value={welcomeVehicleType}
-              onChange={(e) => update('welcomeCoupon', 'vehicleType', e.target.value)}
-              className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-            >
-              {VEHICLE_OPTIONS.map((vehicle) => (
-                <option key={vehicle.value} value={vehicle.value}>
-                  {vehicle.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Discount Amount (₹)" hint="How much off the customer gets">
-            <NumInput value={settings.welcomeCoupon.discountAmount} onChange={(v) => update('welcomeCoupon', 'discountAmount', v)} min={1} />
-          </Field>
-          <Field label="Internal Fare Adjustment (₹)" hint="Added to fare before discount is applied (not shown to customer)">
-            <NumInput value={settings.welcomeCoupon.fareAdjustment} onChange={(v) => update('welcomeCoupon', 'fareAdjustment', v)} min={0} />
-          </Field>
-          <Field label="Exact Amount Shown (Rs)" hint="Amount displayed on the welcome coupon banner">
-            <NumInput value={welcomeShownAmount} onChange={(v) => update('welcomeCoupon', 'exactAmount', v)} min={1} />
-          </Field>
-          <Field label="Validity (days)" hint="How long new users have to use the coupon">
-            <NumInput value={settings.welcomeCoupon.validityDays} onChange={(v) => update('welcomeCoupon', 'validityDays', v)} min={1} />
-          </Field>
-          <div className="mt-3 p-3 bg-orange-50 rounded-lg text-xs text-orange-700">
-            <div className="mb-1">
-              Banner: <strong>{getVehicleLabel(welcomeVehicleType)}</strong> welcome coupon shows <strong>&#8377;{welcomeShownAmount}</strong>; actual net saving is <strong>&#8377;{welcomeNetSaving}</strong>.
-            </div>
-            <strong>Example:</strong> Ride ₹100 → adjusted to ₹{100 + settings.welcomeCoupon.fareAdjustment} → discount ₹{settings.welcomeCoupon.discountAmount} → customer pays <strong>₹{100 + settings.welcomeCoupon.fareAdjustment - settings.welcomeCoupon.discountAmount}</strong>
+
+          {/* ✅ Mode toggle */}
+          <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+            <Toggle
+              checked={isFixedMode}
+              onChange={(v) => update('welcomeCoupon', 'useFixedWelcomeAmount', v)}
+              label="Use Fixed Final Fare Mode"
+            />
+            <p className="text-xs text-orange-600 mt-1">
+              {isFixedMode
+                ? '✅ Customer pays ONLY the fixed amount regardless of base fare. Discount auto-calculated.'
+                : '⚙️ Legacy mode: discount amount is subtracted from the internally-adjusted fare.'}
+            </p>
           </div>
-          {/* ⚠️ Warning: fareAdjustment must be less than discountAmount */}
-          {settings.welcomeCoupon.fareAdjustment >= settings.welcomeCoupon.discountAmount && (
-            <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-semibold">
-              ⚠️ ERROR: Internal Fare Adjustment (₹{settings.welcomeCoupon.fareAdjustment}) must be LESS than Discount Amount (₹{settings.welcomeCoupon.discountAmount}).
-              The net saving to the customer is ₹{settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment} — which is zero or negative!
-              The welcome coupon will NOT show in the app until this is fixed.
-              Set Fare Adjustment to less than ₹{settings.welcomeCoupon.discountAmount}.
-            </div>
+
+          {/* ── FIXED MODE fields ── */}
+          {isFixedMode && (
+            <>
+              <Field
+                label="Vehicle Type"
+                hint="Welcome coupon applies only for this vehicle type"
+              >
+                <select
+                  value={welcomeVehicleType}
+                  onChange={(e) => update('welcomeCoupon', 'vehicleType', e.target.value)}
+                  className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                >
+                  {VEHICLE_OPTIONS.map((vehicle) => (
+                    <option key={vehicle.value} value={vehicle.value}>
+                      {vehicle.icon} {vehicle.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field
+                label="Fixed Final Fare (₹)"
+                hint={`The EXACT amount the customer pays on their first ride. E.g. ₹${fixedAmount} means they pay ₹${fixedAmount} total regardless of base fare.`}
+              >
+                <NumInput
+                  value={fixedAmount}
+                  onChange={(v) => update('welcomeCoupon', 'exactAmount', v)}
+                  min={1}
+                />
+              </Field>
+
+              {/* Fixed mode preview */}
+              <div className="mt-1 p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-800 space-y-1">
+                <div className="font-bold text-sm mb-2">📋 Fixed Fare Mode Preview</div>
+                <div>
+                  Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong>
+                </div>
+                <div>
+                  Customer pays: <strong className="text-green-700 text-base">₹{fixedAmount}</strong>
+                </div>
+                <div>
+                  Coupon code: <strong className="font-mono">{settings.welcomeCoupon.code || 'WELCOME'}</strong>
+                </div>
+                <div className="text-green-700 font-semibold mt-1">
+                  ✅ Final fare will be EXACTLY ₹{fixedAmount}
+                  (discount auto-calculated from base fare at booking time)
+                </div>
+                <div className="mt-2 p-2 bg-white rounded-lg border border-orange-100 text-gray-600">
+                  <strong>Example:</strong> Base fare ₹100 → Customer pays{' '}
+                  <strong>₹{fixedAmount}</strong>{' '}
+                  (₹{Math.max(0, 100 - fixedAmount)} discount applied automatically)
+                </div>
+              </div>
+            </>
           )}
+
+          {/* ── LEGACY MODE fields ── */}
+          {!isFixedMode && (
+            <>
+              <Field
+                label="Discount Amount (₹)"
+                hint="How much off the customer gets (shown in app)"
+              >
+                <NumInput
+                  value={settings.welcomeCoupon.discountAmount}
+                  onChange={(v) => update('welcomeCoupon', 'discountAmount', v)}
+                  min={1}
+                />
+              </Field>
+
+              <Field
+                label="Internal Fare Adjustment (₹)"
+                hint="Added to fare before discount is applied — not shown to customer"
+              >
+                <NumInput
+                  value={settings.welcomeCoupon.fareAdjustment}
+                  onChange={(v) => update('welcomeCoupon', 'fareAdjustment', v)}
+                  min={0}
+                />
+              </Field>
+
+              <Field
+                label="Vehicle Type"
+                hint="Welcome coupon applies only for this vehicle type"
+              >
+                <select
+                  value={welcomeVehicleType}
+                  onChange={(e) => update('welcomeCoupon', 'vehicleType', e.target.value)}
+                  className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                >
+                  {VEHICLE_OPTIONS.map((vehicle) => (
+                    <option key={vehicle.value} value={vehicle.value}>
+                      {vehicle.icon} {vehicle.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+
+              {/* Legacy mode preview */}
+              <div className="mt-1 p-3 bg-orange-50 rounded-xl border border-orange-100 text-xs text-orange-700">
+                <div className="font-bold text-sm mb-2">📋 Legacy Mode Preview</div>
+                <div className="mb-1">
+                  Banner shows <strong>₹{welcomeShownAmount}</strong> for{' '}
+                  <strong>{getVehicleLabel(welcomeVehicleType)}</strong>;
+                  actual net saving is <strong>₹{welcomeNetSaving}</strong>.
+                </div>
+                <div className="p-2 bg-white rounded-lg border border-orange-100 text-gray-600">
+                  <strong>Example:</strong> Ride ₹100 → adjusted to
+                  ₹{100 + settings.welcomeCoupon.fareAdjustment} → discount
+                  ₹{settings.welcomeCoupon.discountAmount} → customer pays{' '}
+                  <strong>
+                    ₹{100 + settings.welcomeCoupon.fareAdjustment - settings.welcomeCoupon.discountAmount}
+                  </strong>
+                </div>
+              </div>
+
+              {/* ⚠️ Legacy validation error */}
+              {legacyInvalid && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-semibold space-y-1">
+                  <div>
+                    ⚠️ ERROR: Internal Fare Adjustment (₹{settings.welcomeCoupon.fareAdjustment}) must be
+                    LESS than Discount Amount (₹{settings.welcomeCoupon.discountAmount}).
+                  </div>
+                  <div>
+                    Net saving = ₹{settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment}
+                    — zero or negative! The welcome coupon will <strong>NOT</strong> appear in the app.
+                  </div>
+                  <div>
+                    Fix: set Fare Adjustment &lt; ₹{settings.welcomeCoupon.discountAmount}.
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Validity — common to both modes */}
+          <Field
+            label="Validity (days)"
+            hint="How long new users have to use the coupon after sign-up"
+          >
+            <NumInput
+              value={settings.welcomeCoupon.validityDays}
+              onChange={(v) => update('welcomeCoupon', 'validityDays', v)}
+              min={1}
+            />
+          </Field>
         </SectionCard>
 
-        {/* Referral System — cycle-based */}
-        <SectionCard icon="👥" title="Referral System" subtitle="Cycle-based rewards — each cycle requires more referrals and pays more">
-          <Toggle checked={settings.referral.enabled} onChange={(v) => update('referral', 'enabled', v)} label="Enable referral rewards" />
+        {/* Referral System — unchanged */}
+        <SectionCard
+          icon="👥"
+          title="Referral System"
+          subtitle="Cycle-based rewards — each cycle requires more referrals and pays more"
+        >
+          <Toggle
+            checked={settings.referral.enabled}
+            onChange={(v) => update('referral', 'enabled', v)}
+            label="Enable referral rewards"
+          />
 
-          {/* Cycle thresholds */}
-          <div className="mt-4 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cycle Thresholds</div>
+          <div className="mt-4 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            Cycle Thresholds
+          </div>
           <Field label="Base Referrals Required (Cycle 1)" hint="Friends who must complete first ride to unlock Cycle-1 reward">
-            <NumInput value={(settings.referral as any).baseReferralsRequired ?? settings.referral.referralsRequired} onChange={(v) => {
-              update('referral', 'baseReferralsRequired', v);
-              update('referral', 'referralsRequired', v);
-            }} min={1} />
+            <NumInput
+              value={(settings.referral as any).baseReferralsRequired ?? settings.referral.referralsRequired}
+              onChange={(v) => { update('referral', 'baseReferralsRequired', v); update('referral', 'referralsRequired', v); }}
+              min={1}
+            />
           </Field>
-          <Field label="Extra Referrals per Cycle" hint="+N more required per subsequent cycle (e.g. 2 → Cycle2 needs +2 more)">
+          <Field label="Extra Referrals per Cycle" hint="+N more required per subsequent cycle">
             <NumInput value={(settings.referral as any).extraReferralsPerCycle ?? 2} onChange={(v) => update('referral', 'extraReferralsPerCycle', v)} min={0} />
           </Field>
-          <Field label="Max Reward Cycles per User" hint="User earns rewards this many times, then the program ends for them">
+          <Field label="Max Reward Cycles per User" hint="User earns rewards this many times">
             <NumInput value={(settings.referral as any).maxReferralCycles ?? 3} onChange={(v) => update('referral', 'maxReferralCycles', v)} min={1} max={10} />
           </Field>
 
-          {/* Coupon rewards */}
           <div className="mt-4 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Coupon Rewards</div>
-          <Field label="Base Coupon Amount ₹ (Cycle 1)" hint="₹ discount coupon issued on first milestone">
-            <NumInput value={(settings.referral as any).baseCouponAmount ?? settings.referral.rewardCouponAmount} onChange={(v) => {
-              update('referral', 'baseCouponAmount', v);
-              update('referral', 'rewardCouponAmount', v);
-            }} min={1} />
+          <Field label="Base Coupon Amount ₹ (Cycle 1)">
+            <NumInput
+              value={(settings.referral as any).baseCouponAmount ?? settings.referral.rewardCouponAmount}
+              onChange={(v) => { update('referral', 'baseCouponAmount', v); update('referral', 'rewardCouponAmount', v); }}
+              min={1}
+            />
           </Field>
-          <Field label="Extra Coupon per Cycle (₹)" hint="Additional ₹ added to coupon for each new cycle">
+          <Field label="Extra Coupon per Cycle (₹)">
             <NumInput value={(settings.referral as any).extraCouponAmount ?? 10} onChange={(v) => update('referral', 'extraCouponAmount', v)} min={0} />
           </Field>
 
-          {/* Coin rewards */}
           <div className="mt-4 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Coin Rewards</div>
-          <Field label="Base Coins Reward (Cycle 1)" hint="Coins awarded on first milestone">
-            <NumInput value={(settings.referral as any).baseCoinsReward ?? settings.referral.rewardCoins} onChange={(v) => {
-              update('referral', 'baseCoinsReward', v);
-              update('referral', 'rewardCoins', v);
-            }} min={0} />
+          <Field label="Base Coins Reward (Cycle 1)">
+            <NumInput
+              value={(settings.referral as any).baseCoinsReward ?? settings.referral.rewardCoins}
+              onChange={(v) => { update('referral', 'baseCoinsReward', v); update('referral', 'rewardCoins', v); }}
+              min={0}
+            />
           </Field>
-          <Field label="Extra Coins per Cycle" hint="Additional coins per cycle (e.g. 10 → Cycle2 gives +10 more coins)">
+          <Field label="Extra Coins per Cycle">
             <NumInput value={(settings.referral as any).extraCoinsReward ?? 10} onChange={(v) => update('referral', 'extraCoinsReward', v)} min={0} />
           </Field>
 
-          {/* Misc */}
           <div className="mt-4 mb-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Misc</div>
           <Field label="Coupon Validity (days)">
             <NumInput value={settings.referral.rewardCouponValidityDays} onChange={(v) => update('referral', 'rewardCouponValidityDays', v)} min={1} />
           </Field>
 
-          {/* Live cycle preview */}
+          {/* Cycle preview */}
           <div className="mt-4 p-4 bg-green-50 rounded-xl border border-green-200 text-xs text-green-800 space-y-1">
             <div className="font-bold text-sm mb-2">📊 Cycle Preview</div>
             {Array.from({ length: (settings.referral as any).maxReferralCycles ?? 3 }, (_, i) => {
@@ -1142,7 +1457,7 @@ const RewardConfigTab: React.FC<{
         </SectionCard>
       </div>
 
-      {/* Driver Referral — under the same Reward Config flow */}
+      {/* Driver Referral — unchanged */}
       <SectionCard
         icon="🚕"
         title="Driver Referral System"
@@ -1153,32 +1468,18 @@ const RewardConfigTab: React.FC<{
           onChange={(v) => updateDriverReferral('enabled', v)}
           label="Enable driver referral rewards"
         />
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Referrals Required">
-            <NumInput
-              value={getDriverReferral().referralsRequired}
-              onChange={(v) => updateDriverReferral('referralsRequired', v)}
-              min={1}
-            />
+            <NumInput value={getDriverReferral().referralsRequired} onChange={(v) => updateDriverReferral('referralsRequired', v)} min={1} />
           </Field>
           <Field label="Rides Required per Referred Driver">
-            <NumInput
-              value={getDriverReferral().ridesToComplete}
-              onChange={(v) => updateDriverReferral('ridesToComplete', v)}
-              min={1}
-            />
+            <NumInput value={getDriverReferral().ridesToComplete} onChange={(v) => updateDriverReferral('ridesToComplete', v)} min={1} />
           </Field>
           <Field label="Wallet Reward Amount ₹">
-            <NumInput
-              value={getDriverReferral().rewardAmount}
-              onChange={(v) => updateDriverReferral('rewardAmount', v)}
-              min={0}
-            />
+            <NumInput value={getDriverReferral().rewardAmount} onChange={(v) => updateDriverReferral('rewardAmount', v)} min={0} />
           </Field>
         </div>
-
-        <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800 space-y-1">
+        <div className="mt-2 p-4 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-800">
           <div className="font-bold text-sm mb-2">📊 Driver Referral Rule Preview</div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold">Refer {getDriverReferral().referralsRequired} driver(s)</span>
@@ -1190,68 +1491,60 @@ const RewardConfigTab: React.FC<{
         </div>
       </SectionCard>
 
-      {/* ═══════════════════════════════════════════════════════════════════
-          🪙 COINS SYSTEM — Full-width panel, all fields clearly grouped
-          ═══════════════════════════════════════════════════════════════ */}
+      {/* Coins System — unchanged from original */}
       <div className="bg-white rounded-2xl border border-amber-200 shadow-sm overflow-hidden">
-
-        {/* Panel header with toggle */}
         <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-xl">🪙</div>
             <div>
               <h3 className="font-bold text-gray-900 text-base">Coins System</h3>
-              <p className="text-xs text-gray-500">Earn &amp; redeem coins for ride discounts — all values are admin-controlled</p>
+              <p className="text-xs text-gray-500">Earn & redeem coins for ride discounts — all values are admin-controlled</p>
             </div>
           </div>
           <Toggle checked={settings.coins.enabled} onChange={(v) => update('coins', 'enabled', v)} label="" />
         </div>
 
         <div className="p-6 space-y-8">
-
-          {/* ── Section 1: Core Settings ── */}
+          {/* Core settings */}
           <div>
             <div className="flex items-center gap-2 mb-4">
               <div className="h-5 w-1 rounded-full bg-amber-400" />
               <span className="text-sm font-bold text-gray-800">Core Settings</span>
-              <span className="text-xs text-gray-400 ml-1">— base earn rate &amp; discount threshold</span>
+              <span className="text-xs text-gray-400 ml-1">— base earn rate & discount threshold</span>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                <p className="text-xs font-semibold text-amber-700 mb-1">🎯 Base Coins / Ride</p>
-                <p className="text-[11px] text-gray-400 mb-2">Minimum every completed ride earns (bonuses stack on top)</p>
-                <NumInput value={settings.coins.coinsPerRide} onChange={(v) => update('coins', 'coinsPerRide', v)} min={1} />
-              </div>
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                <p className="text-xs font-semibold text-amber-700 mb-1">💱 Coin Value (₹)</p>
-                <p className="text-[11px] text-gray-400 mb-2">1 coin = ₹ value &nbsp;(e.g. 0.10 → 100 coins = ₹10)</p>
-                <NumInput value={settings.coins.conversionRate} onChange={(v) => update('coins', 'conversionRate', v)} min={0.01} step={0.01} />
-              </div>
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                <p className="text-xs font-semibold text-amber-700 mb-1">🔓 Coins to Unlock</p>
-                <p className="text-[11px] text-gray-400 mb-2">Coins a user must collect to trigger the discount</p>
-                <NumInput value={settings.coins.coinsRequiredForMaxDiscount} onChange={(v) => update('coins', 'coinsRequiredForMaxDiscount', v)} min={1} />
-              </div>
-              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-                <p className="text-xs font-semibold text-amber-700 mb-1">🏷️ Discount Unlocked (₹)</p>
-                <p className="text-[11px] text-gray-400 mb-2">₹ off given when threshold is reached</p>
-                <NumInput value={settings.coins.maxDiscountPerRide} onChange={(v) => update('coins', 'maxDiscountPerRide', v)} min={1} />
-              </div>
+              {[
+                { key: 'coinsPerRide',                label: '🎯 Base Coins / Ride',    hint: 'Minimum every completed ride earns' },
+                { key: 'conversionRate',              label: '💱 Coin Value (₹)',        hint: '1 coin = ₹ value',                  step: 0.01, min: 0.01 },
+                { key: 'coinsRequiredForMaxDiscount', label: '🔓 Coins to Unlock',       hint: 'Threshold for discount'             },
+                { key: 'maxDiscountPerRide',          label: '🏷️ Discount Unlocked (₹)', hint: '₹ off when threshold reached'      },
+              ].map(({ key, label, hint, step, min }) => (
+                <div key={key} className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-amber-700 mb-1">{label}</p>
+                  <p className="text-[11px] text-gray-400 mb-2">{hint}</p>
+                  <input
+                    type="number"
+                    value={(settings.coins as any)[key]}
+                    min={min ?? 0}
+                    step={step}
+                    onChange={(e) => update('coins', key, Number(e.target.value))}
+                    className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              ))}
             </div>
             <div className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-amber-100 rounded-full text-xs font-semibold text-amber-800">
-              🏆 Collect <strong>{settings.coins.coinsRequiredForMaxDiscount}</strong> coins → unlock <strong>₹{settings.coins.maxDiscountPerRide} off</strong> &nbsp;·&nbsp; 1 coin ≈ ₹{settings.coins.conversionRate}
+              🏆 Collect <strong>{settings.coins.coinsRequiredForMaxDiscount}</strong> coins → unlock{' '}
+              <strong>₹{settings.coins.maxDiscountPerRide} off</strong>
             </div>
           </div>
 
-          {/* ── Section 2: Distance Bonus + Vehicle Bonus side by side ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-            {/* Distance Bonus */}
+            {/* Distance Bonus Tiers */}
             <div className="border border-blue-100 rounded-xl overflow-hidden">
               <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center gap-2">
                 <div className="h-4 w-1 rounded-full bg-blue-400" />
                 <span className="text-sm font-bold text-gray-800">📍 Distance Bonus Tiers</span>
-                <span className="text-xs text-gray-400 ml-1">— extra coins by trip length</span>
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-3 gap-3">
@@ -1267,21 +1560,20 @@ const RewardConfigTab: React.FC<{
                       </div>
                       <div className="flex items-center justify-center gap-1 mb-1">
                         <span className="text-xs text-gray-400 font-medium">+</span>
-                        <NumInput
-                          value={tier.bonus}
-                          min={0}
-                          onChange={(v) => {
+                        <input
+                          type="number" value={tier.bonus} min={0}
+                          onChange={(e) => {
                             const newTiers = [...(settings.coins.distanceBonuses ?? [])];
-                            newTiers[i] = { ...tier, bonus: v };
+                            newTiers[i] = { ...tier, bonus: Number(e.target.value) };
                             update('coins', 'distanceBonuses', newTiers);
                           }}
+                          className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500"
                         />
                       </div>
                       <div className="text-[10px] text-blue-500 font-semibold">coins</div>
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-gray-400 mt-3">Tier ranges are fixed (0–3 / 3–8 / 8+ km). Edit bonus coins per tier above.</p>
               </div>
             </div>
 
@@ -1290,17 +1582,18 @@ const RewardConfigTab: React.FC<{
               <div className="bg-purple-50 px-4 py-3 border-b border-purple-100 flex items-center gap-2">
                 <div className="h-4 w-1 rounded-full bg-purple-400" />
                 <span className="text-sm font-bold text-gray-800">🚗 Vehicle Bonus</span>
-                <span className="text-xs text-gray-400 ml-1">— extra coins by vehicle type</span>
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-5 gap-2">
-                  {([
-                    { key: 'bike'    as const, emoji: '🏍️', label: 'Bike'    },
-                    { key: 'auto'    as const, emoji: '🛺',  label: 'Auto'    },
-                    { key: 'car'     as const, emoji: '🚙',  label: 'Car'     },
-                    { key: 'premium' as const, emoji: '🚘',  label: 'Premium' },
-                    { key: 'xl'      as const, emoji: '🚐',  label: 'XL'      },
-                  ]).map(({ key, emoji, label }) => {
+                  {(
+                    [
+                      { key: 'bike'    as const, emoji: '🏍️', label: 'Bike'    },
+                      { key: 'auto'    as const, emoji: '🛺',  label: 'Auto'    },
+                      { key: 'car'     as const, emoji: '🚙',  label: 'Car'     },
+                      { key: 'premium' as const, emoji: '🚘',  label: 'Premium' },
+                      { key: 'xl'      as const, emoji: '🚐',  label: 'XL'      },
+                    ]
+                  ).map(({ key, emoji, label }) => {
                     const val = settings.coins.vehicleBonuses?.[key] ?? 0;
                     return (
                       <div key={key} className="bg-purple-50 border border-purple-200 rounded-xl p-2 text-center">
@@ -1308,13 +1601,13 @@ const RewardConfigTab: React.FC<{
                         <div className="text-[10px] font-semibold text-gray-600 mb-2">{label}</div>
                         <div className="flex items-center justify-center gap-0.5 mb-1">
                           <span className="text-[10px] text-gray-400 font-medium">+</span>
-                          <NumInput
-                            value={val}
-                            min={0}
-                            onChange={(v) => {
-                              const newVeh = { ...(settings.coins.vehicleBonuses ?? {}), [key]: v };
+                          <input
+                            type="number" value={val} min={0}
+                            onChange={(e) => {
+                              const newVeh = { ...(settings.coins.vehicleBonuses ?? {}), [key]: Number(e.target.value) };
                               update('coins', 'vehicleBonuses', newVeh);
                             }}
+                            className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500"
                           />
                         </div>
                         <div className="text-[9px] text-purple-500 font-semibold">coins</div>
@@ -1326,9 +1619,7 @@ const RewardConfigTab: React.FC<{
             </div>
           </div>
 
-          {/* ── Section 3: Lucky Bonus + Live Preview side by side ── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
             {/* Lucky Bonus */}
             <div className="border border-amber-200 rounded-xl overflow-hidden">
               <div className="bg-amber-50 px-4 py-3 border-b border-amber-100 flex items-center gap-2">
@@ -1338,27 +1629,32 @@ const RewardConfigTab: React.FC<{
               <div className="p-4 space-y-3">
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                   <p className="text-xs font-semibold text-amber-700 mb-1">Bonus Coins</p>
-                  <p className="text-[10px] text-gray-400 mb-2">Extra coins on a lucky ride</p>
-                  <NumInput value={settings.coins.randomBonusCoins ?? 10} onChange={(v) => update('coins', 'randomBonusCoins', v)} min={1} />
+                  <p className="text-[10px] text-gray-400 mb-2">Extra coins on lucky ride</p>
+                  <input
+                    type="number" value={settings.coins.randomBonusCoins ?? 10} min={1}
+                    onChange={(e) => update('coins', 'randomBonusCoins', Number(e.target.value))}
+                    className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500"
+                  />
                 </div>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
                   <p className="text-xs font-semibold text-amber-700 mb-1">Trigger Chance (%)</p>
-                  <p className="text-[10px] text-gray-400 mb-2">Probability per ride (e.g. 20 = 20%)</p>
-                  <NumInput value={Math.round((settings.coins.randomBonusChance ?? 0.20) * 100)} onChange={(v) => update('coins', 'randomBonusChance', v / 100)} min={1} max={100} />
-                </div>
-                <div className="flex items-start gap-2 p-3 bg-amber-100 rounded-xl text-[11px] text-amber-800">
-                  <span>🎲</span>
-                  <span><strong>Hidden from fare cards.</strong> The extra +{settings.coins.randomBonusCoins ?? 10} coins appear as a surprise after the ride — creating delight.</span>
+                  <p className="text-[10px] text-gray-400 mb-2">Probability per ride</p>
+                  <input
+                    type="number"
+                    value={Math.round((settings.coins.randomBonusChance ?? 0.20) * 100)}
+                    min={1} max={100}
+                    onChange={(e) => update('coins', 'randomBonusChance', Number(e.target.value) / 100)}
+                    className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500"
+                  />
                 </div>
               </div>
             </div>
 
-            {/* Live Preview Table */}
+            {/* Live Fare Card Preview */}
             <div className="lg:col-span-2 border border-gray-200 rounded-xl overflow-hidden">
               <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-2">
                 <div className="h-4 w-1 rounded-full bg-gray-400" />
                 <span className="text-sm font-bold text-gray-800">👁️ Live Fare Card Preview</span>
-                <span className="text-xs text-gray-400 ml-1">— updates as you change values above</span>
               </div>
               <div className="p-4">
                 <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
@@ -1366,23 +1662,29 @@ const RewardConfigTab: React.FC<{
                     <thead>
                       <tr className="bg-gray-800 text-white">
                         <th className="px-3 py-2.5 text-left font-semibold">Vehicle</th>
-                        {(settings.coins.distanceBonuses ?? [{label:'0–3 km',maxKm:3,bonus:1},{label:'3–8 km',maxKm:8,bonus:2},{label:'8+ km',maxKm:null,bonus:4}]).map(t => (
+                        {(settings.coins.distanceBonuses ?? [
+                          { label: '0–3 km', maxKm: 3, bonus: 1 },
+                          { label: '3–8 km', maxKm: 8, bonus: 2 },
+                          { label: '8+ km',  maxKm: null, bonus: 4 },
+                        ]).map((t) => (
                           <th key={t.label} className="px-3 py-2.5 text-center font-semibold">{t.label}</th>
                         ))}
                         <th className="px-3 py-2.5 text-center font-semibold">Lucky 🎲</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {([
-                        { key: 'bike'    as const, label: '🏍️ Bike'    },
-                        { key: 'auto'    as const, label: '🛺 Auto'    },
-                        { key: 'car'     as const, label: '🚙 Car'     },
-                        { key: 'premium' as const, label: '🚘 Premium' },
-                        { key: 'xl'      as const, label: '🚐 XL'      },
-                      ]).map(({ key, label }, i) => {
+                      {(
+                        [
+                          { key: 'bike'    as const, label: '🏍️ Bike'    },
+                          { key: 'auto'    as const, label: '🛺 Auto'    },
+                          { key: 'car'     as const, label: '🚙 Car'     },
+                          { key: 'premium' as const, label: '🚘 Premium' },
+                          { key: 'xl'      as const, label: '🚐 XL'      },
+                        ]
+                      ).map(({ key, label }, i) => {
                         const vBonus = settings.coins.vehicleBonuses?.[key] ?? 0;
                         const base   = settings.coins.coinsPerRide;
-                        const tiers  = settings.coins.distanceBonuses ?? [{bonus:1},{bonus:2},{bonus:4}];
+                        const tiers  = settings.coins.distanceBonuses ?? [{ bonus: 1 }, { bonus: 2 }, { bonus: 4 }];
                         const lucky  = settings.coins.randomBonusCoins ?? 10;
                         const chance = Math.round((settings.coins.randomBonusChance ?? 0.2) * 100);
                         return (
@@ -1405,19 +1707,20 @@ const RewardConfigTab: React.FC<{
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[10px] text-gray-400 mt-2">
-                  Formula shown to user: Base ({settings.coins.coinsPerRide}) + Distance bonus + Vehicle bonus. Lucky bonus is hidden — surprise after completion.
-                </p>
               </div>
             </div>
           </div>
-
         </div>
       </div>
 
+      {/* Save button */}
       <div className="flex justify-end">
-        <button onClick={handleSave} disabled={saving} className="bg-orange-500 text-white px-8 py-3 rounded-xl font-semibold hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2 text-sm">
-          {saving && <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-orange-500 text-white px-8 py-3 rounded-xl font-semibold hover:bg-orange-600 disabled:opacity-50 flex items-center gap-2 text-sm"
+        >
+          {saving && <Spinner />}
           💾 Save Reward Config
         </button>
       </div>
@@ -1428,27 +1731,25 @@ const RewardConfigTab: React.FC<{
 // ─── Referrals Tab ────────────────────────────────────────────────────────────
 
 const ReferralsTab: React.FC = () => {
-  const [stats, setStats] = useState<ReferralStats | null>(null);
+  const [stats, setStats]               = useState<ReferralStats | null>(null);
   const [topReferrers, setTopReferrers] = useState<TopReferrer[]>([]);
-  const [referrals, setReferrals] = useState<ReferralRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [view, setView] = useState<'stats' | 'list'>('stats');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  // Read admin-configured milestone so the progress bar uses the real target
+  const [referrals, setReferrals]       = useState<ReferralRecord[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [view, setView]                 = useState<'stats' | 'list'>('stats');
+  const [page, setPage]                 = useState(1);
+  const [totalPages, setTotalPages]     = useState(1);
   const [referralsRequired, setReferralsRequired] = useState(5);
 
   useEffect(() => {
     fetchStats();
-    // Load the admin milestone value so the progress bar is accurate
     axios.get(`${API_BASE}/api/admin/reward-config`, getAxiosConfig())
       .then((res) => {
-        if (res.data.success) {
+        if (res.data.success)
           setReferralsRequired(res.data.settings?.referral?.referralsRequired || 5);
-        }
       })
-      .catch(() => {}); // non-critical — fallback stays 5
+      .catch(() => {});
   }, []);
+
   useEffect(() => { if (view === 'list') fetchReferrals(); }, [view, page]);
 
   const fetchStats = async () => {
@@ -1456,7 +1757,8 @@ const ReferralsTab: React.FC = () => {
     try {
       const res = await axios.get(`${API_BASE}/api/admin/referral-stats`, getAxiosConfig());
       if (res.data.success) { setStats(res.data.stats); setTopReferrers(res.data.topReferrers || []); }
-    } catch {} finally { setLoading(false); }
+    } catch {}
+    finally { setLoading(false); }
   };
 
   const fetchReferrals = async () => {
@@ -1464,30 +1766,30 @@ const ReferralsTab: React.FC = () => {
     try {
       const res = await axios.get(`${API_BASE}/api/admin/referrals?page=${page}&limit=20`, getAxiosConfig());
       if (res.data.success) { setReferrals(res.data.referrals); setTotalPages(res.data.pagination.pages); }
-    } catch {} finally { setLoading(false); }
+    } catch {}
+    finally { setLoading(false); }
   };
 
   if (loading && !stats) return (
     <div className="text-center py-16">
-      <svg className="animate-spin h-8 w-8 mx-auto text-orange-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+      <Spinner className="h-8 w-8 mx-auto text-orange-500" />
       <p className="mt-3 text-gray-500">Loading referral data...</p>
     </div>
   );
 
   return (
     <div className="space-y-6">
-      {/* Stats cards */}
       {stats && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             {[
-              { label: 'Total Referrals', value: stats.totalReferrals, icon: '🔗' },
-              { label: 'Completed', value: stats.completedReferrals, icon: '✅' },
-              { label: 'Pending', value: stats.pendingReferrals, icon: '⏳' },
-              { label: 'Users with Code', value: stats.usersWithCode, icon: '🪪' },
-              { label: 'Rewards Issued', value: stats.rewardsIssued, icon: '🎁' },
+              { label: 'Total Referrals',  value: stats.totalReferrals,      icon: '🔗' },
+              { label: 'Completed',        value: stats.completedReferrals,  icon: '✅' },
+              { label: 'Pending',          value: stats.pendingReferrals,    icon: '⏳' },
+              { label: 'Users with Code',  value: stats.usersWithCode,       icon: '🪪' },
+              { label: 'Rewards Issued',   value: stats.rewardsIssued,       icon: '🎁' },
               { label: 'Exhausted Cycles', value: stats.exhaustedCount ?? 0, icon: '🏁' },
-              { label: 'Conversion', value: stats.conversionRate, icon: '📊' },
+              { label: 'Conversion',       value: stats.conversionRate,      icon: '📊' },
             ].map((s) => (
               <div key={s.label} className="bg-white rounded-xl p-4 border shadow-sm text-center">
                 <div className="text-2xl mb-1">{s.icon}</div>
@@ -1511,12 +1813,21 @@ const ReferralsTab: React.FC = () => {
         </>
       )}
 
-      {/* Sub-nav */}
       <div className="flex gap-2">
-        <button onClick={() => setView('stats')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${view === 'stats' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+        <button
+          onClick={() => setView('stats')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            view === 'stats' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
           🏆 Top Referrers
         </button>
-        <button onClick={() => setView('list')} className={`px-4 py-2 rounded-lg text-sm font-medium transition ${view === 'list' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+        <button
+          onClick={() => setView('list')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            view === 'list' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
           📋 All Referrals
         </button>
       </div>
@@ -1531,7 +1842,7 @@ const ReferralsTab: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50 text-left">
-                    {['Rank', 'Name', 'Phone', 'Code', 'Progress', 'Cycle', 'Reward'].map((h) => (
+                    {['Rank','Name','Phone','Code','Progress','Cycle','Reward'].map((h) => (
                       <th key={h} className="p-3 font-semibold text-gray-600">{h}</th>
                     ))}
                   </tr>
@@ -1540,19 +1851,31 @@ const ReferralsTab: React.FC = () => {
                   {topReferrers.map((r, i) => (
                     <tr key={r._id} className="border-b hover:bg-gray-50">
                       <td className="p-3">
-                        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${i === 0 ? 'bg-yellow-100 text-yellow-700' : i === 1 ? 'bg-gray-100 text-gray-700' : i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-gray-50 text-gray-500'}`}>
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                          i === 0 ? 'bg-yellow-100 text-yellow-700' :
+                          i === 1 ? 'bg-gray-100 text-gray-700'    :
+                          i === 2 ? 'bg-orange-100 text-orange-700' :
+                                    'bg-gray-50 text-gray-500'
+                        }`}>
                           {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i + 1}
                         </span>
                       </td>
                       <td className="p-3 font-medium">{r.name}</td>
                       <td className="p-3 text-gray-500">{r.phone}</td>
-                      <td className="p-3"><span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs">{r.referralCode}</span></td>
+                      <td className="p-3">
+                        <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs">{r.referralCode}</span>
+                      </td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <div className="w-20 bg-gray-200 rounded-full h-2">
-                            <div className="bg-orange-500 h-2 rounded-full" style={{ width: `${Math.min(((r.referralProgress ?? 0) / (r.requiredReferrals || referralsRequired)) * 100, 100)}%` }} />
+                            <div
+                              className="bg-orange-500 h-2 rounded-full"
+                              style={{ width: `${Math.min(((r.referralProgress ?? 0) / (r.requiredReferrals || referralsRequired)) * 100, 100)}%` }}
+                            />
                           </div>
-                          <span className="font-semibold text-xs">{r.referralProgress ?? 0}/{r.requiredReferrals || referralsRequired}</span>
+                          <span className="font-semibold text-xs">
+                            {r.referralProgress ?? 0}/{r.requiredReferrals || referralsRequired}
+                          </span>
                         </div>
                         <div className="text-xs text-gray-400 mt-0.5">Total: {r.successfulReferrals}</div>
                       </td>
@@ -1588,7 +1911,7 @@ const ReferralsTab: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-gray-50 text-left">
-                      {['Referrer', 'Referred User', 'Code Used', 'Joined', 'First Ride', 'Status'].map((h) => (
+                      {['Referrer','Referred User','Code Used','Joined','First Ride','Status'].map((h) => (
                         <th key={h} className="p-3 font-semibold text-gray-600">{h}</th>
                       ))}
                     </tr>
@@ -1604,9 +1927,17 @@ const ReferralsTab: React.FC = () => {
                           <div className="font-medium">{r.referredUserId?.name || '—'}</div>
                           <div className="text-xs text-gray-400">{r.referredUserId?.phone}</div>
                         </td>
-                        <td className="p-3"><span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs">{r.referrerId?.referralCode}</span></td>
-                        <td className="p-3 text-gray-500 text-xs">{new Date(r.createdAt).toLocaleDateString()}</td>
-                        <td className="p-3 text-gray-500 text-xs">{r.firstRideCompletedAt ? new Date(r.firstRideCompletedAt).toLocaleDateString() : '—'}</td>
+                        <td className="p-3">
+                          <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-xs">
+                            {r.referrerId?.referralCode}
+                          </span>
+                        </td>
+                        <td className="p-3 text-gray-500 text-xs">
+                          {new Date(r.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="p-3 text-gray-500 text-xs">
+                          {r.firstRideCompletedAt ? new Date(r.firstRideCompletedAt).toLocaleDateString() : '—'}
+                        </td>
                         <td className="p-3">
                           {r.firstRideCompleted
                             ? <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">✅ Completed</span>
@@ -1619,9 +1950,21 @@ const ReferralsTab: React.FC = () => {
               </div>
               {totalPages > 1 && (
                 <div className="flex justify-center gap-2 mt-4">
-                  <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 rounded border text-sm disabled:opacity-40">← Prev</button>
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40"
+                  >
+                    ← Prev
+                  </button>
                   <span className="px-3 py-1 text-sm text-gray-600">Page {page} / {totalPages}</span>
-                  <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="px-3 py-1 rounded border text-sm disabled:opacity-40">Next →</button>
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                    className="px-3 py-1 rounded border text-sm disabled:opacity-40"
+                  >
+                    Next →
+                  </button>
                 </div>
               )}
             </>
