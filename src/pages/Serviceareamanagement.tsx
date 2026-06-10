@@ -1,10 +1,8 @@
-
 import React, {
   useCallback, useEffect, useRef, useState,
 } from 'react';
 import axios from 'axios';
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css';
+import { OlaMaps, defaultStyleJson } from 'olamaps-web-sdk';
 
 /* ═══════════════════════════════════════════════════════════
    TYPES
@@ -42,6 +40,8 @@ const API_BASE = (() => {
   return raw.replace(/\/api\/?$/, '').replace(/\/$/, '') || 'https://your-api.com';
 })();
 
+const MAPS_KEY = (import.meta as any).env?.VITE_OLA_MAPS_KEY ?? '';
+
 const hdrs = () => ({
   headers: {
     Authorization: `Bearer ${localStorage.getItem('adminToken') ?? ''}`,
@@ -61,30 +61,13 @@ const CITY_CENTERS: Record<string, [number, number]> = {
    DESIGN TOKENS
 ═══════════════════════════════════════════════════════════ */
 const T = {
-  // Palette — deep navy ops theme
-  bg0:    '#070d1a',   // deepest bg
-  bg1:    '#0d1525',   // main bg
-  bg2:    '#111e33',   // panel bg
-  bg3:    '#172240',   // elevated
-  line:   '#1e2f4a',   // borders
-  line2:  '#243654',   // stronger borders
-  // Accents
-  teal:   '#00d4aa',
-  tealD:  '#00a884',
-  amber:  '#f5a623',
-  red:    '#ff4757',
-  blue:   '#4a9eff',
-  purple: '#a78bfa',
-  // Text
-  t1:     '#e8f0fe',   // primary
-  t2:     '#8fa8d4',   // secondary
-  t3:     '#4a6080',   // muted
-  // Status
-  live:   '#00d4aa',
-  off:    '#ff4757',
-  city:   '#4a9eff',
-  cluster:'#a78bfa',
-  area:   '#f5a623',
+  bg0:    '#070d1a',   bg1:    '#0d1525',   bg2:    '#111e33',
+  bg3:    '#172240',   line:   '#1e2f4a',   line2:  '#243654',
+  teal:   '#00d4aa',   tealD:  '#00a884',   amber:  '#f5a623',
+  red:    '#ff4757',   blue:   '#4a9eff',   purple: '#a78bfa',
+  t1:     '#e8f0fe',   t2:     '#8fa8d4',   t3:     '#4a6080',
+  live:   '#00d4aa',   off:    '#ff4757',
+  city:   '#4a9eff',   cluster:'#a78bfa',   area:   '#f5a623',
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -210,7 +193,6 @@ const Toast = ({ msg, clear }: { msg: ToastMsg; clear: () => void }) => {
   );
 };
 
-/* Progress bar */
 const ProgressBar = ({ label, sub }: { label: string; sub: string }) => (
   <div style={{ padding: '12px 14px', borderRadius: 10, background: T.teal + '0c',
     border: `1px solid ${T.teal}20`, marginBottom: 12 }}>
@@ -227,7 +209,6 @@ const ProgressBar = ({ label, sub }: { label: string; sub: string }) => (
   </div>
 );
 
-/* Section header */
 const SectionHead = ({ icon, title, count }: { icon: string; title: string; count?: number }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
     <span style={{ fontSize: 13 }}>{icon}</span>
@@ -241,7 +222,6 @@ const SectionHead = ({ icon, title, count }: { icon: string; title: string; coun
   </div>
 );
 
-/* Zone row in sidebar list */
 const ZoneRow = ({ zone, active, onClick }: { zone: Zone; active: boolean; onClick: () => void }) => (
   <div onClick={onClick} style={{
     padding: '9px 14px', cursor: 'pointer', transition: 'background .1s',
@@ -267,23 +247,47 @@ const ZoneRow = ({ zone, active, onClick }: { zone: Zone; active: boolean; onCli
 );
 
 /* ═══════════════════════════════════════════════════════════
+   HELPER: Create Custom Marker Element
+═══════════════════════════════════════════════════════════ */
+function makeMarkerEl(color: string, emoji: string, size = 36): HTMLDivElement {
+  const el = document.createElement('div');
+  Object.assign(el.style, {
+    width:          `${size}px`,
+    height:         `${size}px`,
+    borderRadius:   '999px',
+    background:     color,
+    border:         '3px solid #fff',
+    boxShadow:      '0 4px 18px rgba(0,0,0,0.45)',
+    display:        'flex',
+    alignItems:     'center',
+    justifyContent: 'center',
+    fontSize:       `${Math.round(size * 0.48)}px`,
+    cursor:         'pointer',
+    userSelect:     'none',
+    transition:     'transform 0.15s ease',
+  });
+  el.textContent = emoji;
+  return el;
+}
+
+function popupHtml(title: string, lines: string[]) {
+  return `<div style="font-family:Inter,sans-serif;min-width:170px;color:#0f172a">
+    <div style="font-size:0.7rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:5px">${title}</div>
+    ${lines.map(l => `<div style="font-size:0.8rem;line-height:1.55;color:#334155">${l}</div>`).join('')}
+  </div>`;
+}
+
+/* ═══════════════════════════════════════════════════════════
    MAIN COMPONENT
 ═══════════════════════════════════════════════════════════ */
-
-// Inject global styles once
 const _style = typeof document !== 'undefined' && (() => {
   if (document.getElementById('sam-styles')) return;
   const s = document.createElement('style');
   s.id = 'sam-styles';
   s.textContent = `
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-    .leaflet-tooltip { background: rgba(7,13,26,.9) !important; border: 1px solid rgba(255,255,255,.15) !important;
-      color: #e8f0fe !important; font-family: 'DM Sans',system-ui !important;
-      font-size: 10px !important; font-weight: 800 !important; padding: 2px 7px !important;
-      border-radius: 5px !important; box-shadow: 0 2px 8px rgba(0,0,0,.5) !important; }
-    .leaflet-tooltip::before { display: none !important; }
-    /* Hide leaflet-draw toolbar during custom drawing (we replaced it) */
-    .leaflet-draw-toolbar { display: none !important; }
+    @keyframes sam-spin { to { transform: rotate(360deg); } }
+    @keyframes sam-progress { from { margin-left: 0; width: 50%; } to { margin-left: 50%; width: 40%; } }
+    @keyframes sam-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   `;
   document.head.appendChild(s);
 })();
@@ -318,23 +322,17 @@ export default function ServiceAreaManagement() {
   /* ── map refs ── */
   const mapDiv    = useRef<HTMLDivElement>(null);
   const mapInst   = useRef<any>(null);
-  const Lref      = useRef<any>(null);
-  const drawFG    = useRef<any>(null);
-  const drawCtrl  = useRef<any>(null);
   const drawnPts  = useRef<Coord[]>([]);
-  const editingLayer = useRef<any>(null);
 
-  // zoneId → leaflet polygon layer
-  const zoneLayers = useRef<Map<string, any>>(new Map());
-  const exLayers   = useRef<Map<string, any>>(new Map());
-
-  // ── Custom point-by-point draw system ──
+  // Custom drawing state
   const customMarkers  = useRef<any[]>([]);
-  const customPolyLine = useRef<any>(null);
-  const customPolygon  = useRef<any>(null);
   const [livePointCount, setLivePointCount] = useState(0);
 
-  // always-fresh mode ref for leaflet callbacks
+  // Layer storage
+  const zoneLayers = useRef<Map<string, any>>(new Map());
+  const exLayers   = useRef<Map<string, any>>(new Map());
+  const editingPolygon = useRef<any>(null);
+
   const modeRef = useRef<Mode>({ tag: 'idle' });
   const setMode = useCallback((m: Mode) => { modeRef.current = m; setMode_(m); }, []);
 
@@ -349,7 +347,6 @@ export default function ServiceAreaManagement() {
         ...z, exclusionZones: z.exclusionZones ?? [],
       }));
       setZones(data);
-      // refresh active zone in mode
       setMode_(prev => {
         if (prev.tag === 'detail' || prev.tag === 'editing' ||
           prev.tag === 'draw_exclusion' || prev.tag === 'confirm_exclusion') {
@@ -389,16 +386,7 @@ export default function ServiceAreaManagement() {
   };
 
   const saveEditedZone = async (zone: Zone) => {
-    // Always harvest the very latest coords from the live layer
-    const lyr = editingLayer.current;
-    if (lyr) {
-      const latlngs = lyr.getLatLngs();
-      const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
-      drawnPts.current = ring.map((p: any) => ({
-        lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6),
-      }));
-    }
-    if (!drawnPts.current.length) return notify('No polygon data — drag the handles first', false);
+    if (!drawnPts.current.length) return notify('No polygon data', false);
     setSaving(true);
     try {
       await axios.put(`${API_BASE}/api/zones/${zone._id}`,
@@ -409,33 +397,6 @@ export default function ServiceAreaManagement() {
       await loadZones();
     } catch { notify('Save failed', false); }
     finally { setSaving(false); }
-  };
-
-  const saveExclusionDraw = async (zone: Zone) => {
-    // Harvest latest coords from the live editable layer (same pattern as saveEditedZone)
-    const lyr = editingLayer.current;
-    if (lyr) {
-      const latlngs = lyr.getLatLngs();
-      const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
-      drawnPts.current = ring.map((p: any) => ({
-        lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6),
-      }));
-    }
-    if (!drawnPts.current.length) return notify('No cut-out shape found', false);
-    setSaving(true);
-    try {
-      await axios.post(`${API_BASE}/api/zones/${zone._id}/exclusion`, {
-        name: exLabel.trim() || 'Excluded Area',
-        polygon: drawnPts.current,
-      }, hdrs());
-      notify('Cut-out saved ✓');
-      setExLabel('');
-      clearDraw();
-      setMode({ tag: 'detail', zone });
-      await loadZones();
-    } catch (e: any) {
-      notify(e.response?.data?.message ?? 'Failed to save cut-out', false);
-    } finally { setSaving(false); }
   };
 
   const saveExclusion = async (zone: Zone) => {
@@ -504,201 +465,68 @@ export default function ServiceAreaManagement() {
       setGenResult(r.data);
       notify(`Generated ${r.data.clusters?.length ?? 0} clusters for ${genInput}`);
       await loadZones();
-      // Fly to the city on the map
       if (r.data.city?.polygon?.length) {
         const pts = r.data.city.polygon as Coord[];
         const avgLat = pts.reduce((s, p) => s + p.lat, 0) / pts.length;
         const avgLng = pts.reduce((s, p) => s + p.lng, 0) / pts.length;
-        mapInst.current?.flyTo([avgLat, avgLng], 11, { duration: 1.5 });
+        mapInst.current?.flyTo({ center: [avgLng, avgLat], zoom: 11, duration: 1500 });
       }
     } catch (e: any) {
       notify(e.response?.data?.message ?? 'Generation failed', false);
     } finally { setGenLoading(false); }
   };
 
-  /* ───────────────────── MAP INIT ───────────────────── */
+  /* ───────────────────── MAP INIT (OLA MAPS) ───────────────────── */
   useEffect(() => {
-    if (mapInst.current || !mapDiv.current) return;
+    if (mapInst.current || !mapDiv.current || !MAPS_KEY) return;
+    let cancelled = false;
+
     (async () => {
-      const L = (await import('leaflet')).default;
-      await import('leaflet-draw');
-      Lref.current = L;
+      try {
+        const olaMaps = new OlaMaps({ apiKey: MAPS_KEY });
+        const map = await olaMaps.init({
+          container: mapDiv.current!,
+          style: defaultStyleJson,
+          center: [78.487, 17.385], // [lng, lat]
+          zoom: 11,
+          attributionControl: false,
+        });
 
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconUrl:       'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        shadowUrl:     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-      });
+        if (cancelled) { map.remove?.(); return; }
+        mapInst.current = map;
 
-      const map = L.map(mapDiv.current!, { zoomControl: true }).setView([17.385, 78.487], 11);
-      mapInst.current = map;
+        map.addControl(new OlaMaps.NavigationControl({ showCompass: true }), 'top-right');
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '© OpenStreetMap © CARTO',
-        maxZoom: 19,
-      }).addTo(map);
-
-      // FeatureGroup used for both draw_new starter polygon and edit mode
-      const fg = new (L as any).FeatureGroup();
-      map.addLayer(fg);
-      drawFG.current = fg;
-
-      // CREATED fires only when cut-out polygon is finished (draw_exclusion uses click-tool)
-      map.on((L as any).Draw.Event.CREATED, (e: any) => {
-        fg.clearLayers();
-        fg.addLayer(e.layer);
-        drawnPts.current = e.layer.getLatLngs()[0]
-          .map((p: any) => ({ lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6) }));
-        if (drawCtrl.current) { map.removeControl(drawCtrl.current); drawCtrl.current = null; }
-        const cur = modeRef.current;
-        if (cur.tag === 'draw_exclusion') setMode({ tag: 'confirm_exclusion', zone: cur.zone });
-      });
-
-      // EDITED fires after vertex drag — syncs drawnPts for both editing and draw_new
-      map.on((L as any).Draw.Event.EDITED, () => {
-        const lyr = editingLayer.current;
-        if (!lyr) return;
-        const latlngs = lyr.getLatLngs();
-        const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
-        drawnPts.current = ring.map((p: any) => ({ lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6) }));
-      });
-
-      setMapReady(true);
+        map.on('load', () => {
+          if (cancelled) return;
+          setMapReady(true);
+        });
+      } catch (err) {
+        console.error('Ola Maps init error:', err);
+      }
     })();
-  }, [setMode]);
 
-  /* ── refreshLivePolygon: redraws preview from current vertex markers ── */
-  const refreshLivePolygon = useCallback(() => {
-    const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L) return;
-    const color = modeRef.current.tag === 'draw_exclusion' ? '#ff4757' : '#00d4aa';
-    const pts   = customMarkers.current.map((m: any) => m.getLatLng());
-
-    if (customPolyLine.current) { try { map.removeLayer(customPolyLine.current); } catch {} customPolyLine.current = null; }
-    if (customPolygon.current)  { try { map.removeLayer(customPolygon.current);  } catch {} customPolygon.current  = null; }
-    if (pts.length < 2) return;
-
-    if (pts.length === 2) {
-      customPolyLine.current = L.polyline(pts, { color, weight: 2.5, dashArray: '6 4', opacity: 0.9 }).addTo(map);
-    } else {
-      customPolygon.current = L.polygon(pts, { color, fillColor: color, fillOpacity: 0.18, weight: 2.5, dashArray: '5 4' }).addTo(map);
-      customMarkers.current.forEach((m: any) => { try { m.bringToFront(); } catch {} });
-    }
-  }, []);
-
-  /* ── startCustomDraw: activates click-to-place vertex system ── */
-  const startCustomDraw = useCallback((color: string) => {
-    const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L) return;
-    map.getContainer().style.cursor = 'crosshair';
-
-    const onMapClick = (e: any) => {
-      const cur = modeRef.current;
-      if (cur.tag !== 'draw_new' && cur.tag !== 'draw_exclusion') return;
-
-      const marker = L.circleMarker([e.latlng.lat, e.latlng.lng], {
-        radius: 7, color: '#ffffff', fillColor: color,
-        fillOpacity: 1, weight: 2.5,
-        interactive: true, bubblingMouseEvents: false,
-      }).addTo(map);
-
-      // Drag: mousedown → mousemove on map → mouseup
-      marker.on('mousedown', (me: any) => {
-        map.dragging.disable();
-        me.originalEvent?.stopPropagation();
-        const onMove = (mv: any) => {
-          marker.setLatLng(map.mouseEventToLatLng(mv.originalEvent ?? mv));
-          refreshLivePolygon();
-        };
-        const onUp = () => {
-          map.dragging.enable();
-          map.off('mousemove', onMove);
-          map.off('mouseup', onUp);
-          refreshLivePolygon();
-        };
-        map.on('mousemove', onMove);
-        map.on('mouseup', onUp);
-      });
-
-      // Right-click = delete this vertex
-      marker.on('contextmenu', (ce: any) => {
-        ce.originalEvent?.preventDefault();
-        ce.originalEvent?.stopPropagation();
-        const idx = customMarkers.current.indexOf(marker);
-        if (idx !== -1) {
-          map.removeLayer(marker);
-          customMarkers.current.splice(idx, 1);
-          customMarkers.current.forEach((m: any, i: number) => { try { m.setTooltipContent(String(i + 1)); } catch {} });
-          refreshLivePolygon();
-          setLivePointCount(customMarkers.current.length);
-        }
-      });
-
-      marker.bindTooltip(String(customMarkers.current.length + 1), {
-        permanent: true, direction: 'top', offset: [0, -10],
-      });
-
-      customMarkers.current.push(marker);
-      refreshLivePolygon();
-      setLivePointCount(customMarkers.current.length);
+    return () => {
+      cancelled = true;
+      setMapReady(false);
+      zoneLayers.current.forEach(l => l.remove?.());
+      zoneLayers.current.clear();
+      exLayers.current.forEach(l => l.remove?.());
+      exLayers.current.clear();
+      mapInst.current?.remove?.();
+      mapInst.current = null;
     };
-
-    (map as any)._samClickHandler = onMapClick;
-    map.on('click', onMapClick);
-  }, [refreshLivePolygon]);
-
-  /* ── stopCustomDraw: remove all custom layers + click handler ── */
-  const stopCustomDraw = useCallback(() => {
-    const map = mapInst.current;
-    if (!map) return;
-    if ((map as any)._samClickHandler) {
-      map.off('click', (map as any)._samClickHandler);
-      (map as any)._samClickHandler = null;
-    }
-    map.getContainer().style.cursor = '';
-    customMarkers.current.forEach((m: any) => { try { map.removeLayer(m); } catch {} });
-    customMarkers.current = [];
-    if (customPolyLine.current) { try { map.removeLayer(customPolyLine.current); } catch {} customPolyLine.current = null; }
-    if (customPolygon.current)  { try { map.removeLayer(customPolygon.current);  } catch {} customPolygon.current  = null; }
-    setLivePointCount(0);
   }, []);
 
-  /* ── finishCustomDraw: collect coords and advance state ── */
-  const finishCustomDraw = useCallback(() => {
-    if (customMarkers.current.length < 3) { alert('Place at least 3 points first.'); return; }
-    drawnPts.current = customMarkers.current.map((m: any) => {
-      const ll = m.getLatLng();
-      return { lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6) };
-    });
-    const cur = modeRef.current;
-    if      (cur.tag === 'draw_new')       setMode({ tag: 'confirm_new' });
-    else if (cur.tag === 'draw_exclusion') setMode({ tag: 'confirm_exclusion', zone: cur.zone });
-  }, [setMode]);
-
-  /* ── undoLastPoint ── */
-  const undoLastPoint = useCallback(() => {
-    const map = mapInst.current;
-    const last = customMarkers.current.pop();
-    if (last && map) { try { map.removeLayer(last); } catch {} }
-    customMarkers.current.forEach((m: any, i: number) => { try { m.setTooltipContent(String(i + 1)); } catch {} });
-    refreshLivePolygon();
-    setLivePointCount(customMarkers.current.length);
-  }, [refreshLivePolygon]);
-
-
-
-  /* ───────────────────── RENDER ZONES ───────────────────── */
+  /* ───────────────────── RENDER ZONES ON MAP ───────────────────── */
   useEffect(() => {
     const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L || !mapReady) return;
+    if (!map || !mapReady) return;
 
-    zoneLayers.current.forEach(l => { try { map.removeLayer(l); } catch {} });
-    exLayers.current.forEach(l =>   { try { map.removeLayer(l); } catch {} });
+    // Clear existing zone layers
+    zoneLayers.current.forEach(l => l.remove?.());
     zoneLayers.current.clear();
+    exLayers.current.forEach(l => l.remove?.());
     exLayers.current.clear();
 
     const activeId =
@@ -706,262 +534,322 @@ export default function ServiceAreaManagement() {
        mode.tag === 'draw_exclusion' || mode.tag === 'confirm_exclusion')
         ? (mode as any).zone._id : null;
 
-    // The zone currently loaded into drawFG for editing — don't render it again
     const editingId = mode.tag === 'editing' ? (mode as any).zone._id : null;
 
     zones.forEach(zone => {
       if (!zone.polygon?.length) return;
-      // Skip the zone being edited — it lives in drawFG instead
-      if (zone._id === editingId) return;
+      if (zone._id === editingId) return; // Skip zone being edited
 
       const isSel  = zone._id === activeId;
       const color  = zone.serviceEnabled ? typeColor(zone.type) : T.off;
 
-      const poly = L.polygon(
-        zone.polygon.map((c: Coord) => [c.lat, c.lng] as [number, number]),
-        {
-          color:       isSel ? T.amber : color,
-          fillColor:   color,
-          fillOpacity: zone.serviceEnabled ? (isSel ? 0.2 : 0.1) : 0.06,
-          weight:      isSel ? 3 : zone.type === 'city' ? 2.5 : 1.5,
-          dashArray:   !zone.serviceEnabled ? '8 5' : zone.type === 'city' ? undefined : '4 3',
-        }
-      ).addTo(map);
+      // Convert to GeoJSON
+      const coordinates = zone.polygon.map(c => [c.lng, c.lat]);
+      coordinates.push(coordinates[0]); // Close the ring
 
-      const hierBadge = zone.type === 'city' ? '🏙️ City' : zone.type === 'cluster' ? '📍 Cluster' : '📌 Area';
-      poly.bindTooltip(`
-        <div style="font-family:system-ui;min-width:120px">
-          <div style="font-size:13px;font-weight:800;color:#111">${zone.name}</div>
-          <div style="font-size:11px;color:#555;margin-top:3px">
-            ${hierBadge} · ${zone.serviceEnabled ? '🟢 Live' : '🔴 Off'}
-          </div>
-          ${zone.exclusionZones?.length ? `<div style="font-size:11px;color:#e33">🚫 ${zone.exclusionZones.length} cut-out(s)</div>` : ''}
-          <div style="font-size:10px;color:#888;margin-top:2px">~${km2(zone.polygon).toFixed(0)} km²</div>
-        </div>`, { sticky: true, opacity: .97 });
+      const geojson = {
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Polygon' as const,
+          coordinates: [coordinates],
+        },
+        properties: {
+          name: zone.name,
+          type: zone.type,
+          enabled: zone.serviceEnabled,
+        },
+      };
 
-      poly.on('click', () => {
+      const sourceId = `zone-${zone._id}`;
+      const layerId = `zone-layer-${zone._id}`;
+
+      if (map.getSource(sourceId)) {
+        map.removeLayer(layerId);
+        map.removeSource(sourceId);
+      }
+
+      map.addSource(sourceId, {
+        type: 'geojson',
+        data: geojson,
+      });
+
+      map.addLayer({
+        id: layerId,
+        type: 'fill',
+        source: sourceId,
+        paint: {
+          'fill-color': color,
+          'fill-opacity': zone.serviceEnabled ? (isSel ? 0.2 : 0.1) : 0.06,
+        },
+      });
+
+      map.addLayer({
+        id: `${layerId}-outline`,
+        type: 'line',
+        source: sourceId,
+        paint: {
+          'line-color': isSel ? T.amber : color,
+          'line-width': isSel ? 3 : zone.type === 'city' ? 2.5 : 1.5,
+          'line-dasharray': !zone.serviceEnabled ? [8, 5] : zone.type === 'city' ? undefined : [4, 3],
+        },
+      });
+
+      // Store for cleanup
+      zoneLayers.current.set(zone._id, { layerId, sourceId });
+
+      // Click handler
+      map.on('click', layerId, () => {
         const fresh = zones.find(z => z._id === zone._id) ?? zone;
         setMode({ tag: 'detail', zone: fresh });
       });
 
-      zoneLayers.current.set(zone._id, poly);
-
-      // Exclusion holes
+      // Exclusion zones
       (zone.exclusionZones ?? []).forEach(ex => {
         if (!ex.polygon?.length) return;
-        const ep = L.polygon(
-          ex.polygon.map((c: Coord) => [c.lat, c.lng] as [number, number]),
-          { color: T.red, fillColor: T.red, fillOpacity: 0.3, weight: 1.5, dashArray: '4 3' }
-        ).addTo(map);
-        ep.bindTooltip(`<div style="font-family:system-ui;font-size:12px;font-weight:700;color:#ff4757">🚫 ${ex.name}</div>`, { sticky: true });
-        exLayers.current.set(ex._id, ep);
+        const exCoords = ex.polygon.map(c => [c.lng, c.lat]);
+        exCoords.push(exCoords[0]);
+
+        const exGeoJson = {
+          type: 'Feature' as const,
+          geometry: {
+            type: 'Polygon' as const,
+            coordinates: [exCoords],
+          },
+          properties: { name: ex.name },
+        };
+
+        const exSourceId = `exclusion-${ex._id}`;
+        const exLayerId = `exclusion-layer-${ex._id}`;
+
+        if (map.getSource(exSourceId)) {
+          map.removeLayer(exLayerId);
+          map.removeSource(exSourceId);
+        }
+
+        map.addSource(exSourceId, { type: 'geojson', data: exGeoJson });
+        map.addLayer({
+          id: exLayerId,
+          type: 'fill',
+          source: exSourceId,
+          paint: { 'fill-color': T.red, 'fill-opacity': 0.3 },
+        });
+        map.addLayer({
+          id: `${exLayerId}-outline`,
+          type: 'line',
+          source: exSourceId,
+          paint: { 'line-color': T.red, 'line-width': 1.5, 'line-dasharray': [4, 3] },
+        });
+
+        exLayers.current.set(ex._id, { layerId: exLayerId, sourceId: exSourceId });
       });
     });
   }, [zones, mode, mapReady, setMode]);
 
-  /* ───────────────────── DRAW TOOLS ───────────────────── */
+  /* ───────────────────── DRAWING TOOLS ───────────────────── */
   const clearDraw = useCallback(() => {
-    // Clear custom draw markers + preview
     const map = mapInst.current;
     if (map) {
+      // Remove click handler
       if ((map as any)._samClickHandler) {
         map.off('click', (map as any)._samClickHandler);
         (map as any)._samClickHandler = null;
       }
-      map.getContainer().style.cursor = '';
+      map.getCanvas().style.cursor = '';
     }
-    customMarkers.current.forEach((m: any) => { try { map?.removeLayer(m); } catch {} });
+
+    // Remove custom markers
+    customMarkers.current.forEach(m => m.remove?.());
     customMarkers.current = [];
-    if (customPolyLine.current) { try { map?.removeLayer(customPolyLine.current); } catch {} customPolyLine.current = null; }
-    if (customPolygon.current)  { try { map?.removeLayer(customPolygon.current);  } catch {} customPolygon.current  = null; }
     setLivePointCount(0);
-    // Also clear edit-mode layers
-    drawFG.current?.clearLayers();
+
+    // Remove editing polygon
+    if (editingPolygon.current) {
+      editingPolygon.current.remove?.();
+      editingPolygon.current = null;
+    }
+
     drawnPts.current = [];
-    editingLayer.current = null;
-    if (drawCtrl.current && map) {
-      try { map.removeControl(drawCtrl.current); } catch {}
-      drawCtrl.current = null;
+  }, []);
+
+  const startCustomDraw = useCallback((color: string) => {
+    const map = mapInst.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = 'crosshair';
+
+    const onMapClick = (e: any) => {
+      const cur = modeRef.current;
+      if (cur.tag !== 'draw_new' && cur.tag !== 'draw_exclusion') return;
+
+      const { lng, lat } = e.lngLat;
+
+      const el = makeMarkerEl(color, String(customMarkers.current.length + 1), 24);
+      const marker = new OlaMaps.Marker({ element: el, draggable: true })
+        .setLngLat([lng, lat])
+        .addTo(map);
+
+      customMarkers.current.push(marker);
+      setLivePointCount(customMarkers.current.length);
+
+      // Update polygon preview
+      updatePolygonPreview(color);
+    };
+
+    (map as any)._samClickHandler = onMapClick;
+    map.on('click', onMapClick);
+  }, []);
+
+  const updatePolygonPreview = useCallback((color: string) => {
+    const map = mapInst.current;
+    if (!map) return;
+
+    const coords = customMarkers.current.map(m => {
+      const ll = m.getLngLat();
+      return [ll.lng, ll.lat];
+    });
+
+    if (coords.length < 3) return;
+
+    coords.push(coords[0]); // Close polygon
+
+    const geojson = {
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Polygon' as const,
+        coordinates: [coords],
+      },
+      properties: {},
+    };
+
+    if (map.getSource('draw-preview')) {
+      (map.getSource('draw-preview') as any).setData(geojson);
+    } else {
+      map.addSource('draw-preview', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'draw-preview-fill',
+        type: 'fill',
+        source: 'draw-preview',
+        paint: { 'fill-color': color, 'fill-opacity': 0.18 },
+      });
+      map.addLayer({
+        id: 'draw-preview-outline',
+        type: 'line',
+        source: 'draw-preview',
+        paint: { 'line-color': color, 'line-width': 2.5, 'line-dasharray': [5, 4] },
+      });
     }
   }, []);
 
-  /**
-   * startDrawNewMode — manual zone drawing.
-   * Places a starter rectangle on the current map view and activates
-   * leaflet-draw vertex handles — same UX as "Edit Zone Shape":
-   *   1. Drag white handles  2. Click midpoints to add vertices  3. Click Save Zone
-   */
+  const finishCustomDraw = useCallback(() => {
+    if (customMarkers.current.length < 3) {
+      alert('Place at least 3 points first.');
+      return;
+    }
+    drawnPts.current = customMarkers.current.map(m => {
+      const ll = m.getLngLat();
+      return { lat: ll.lat, lng: ll.lng };
+    });
+    const cur = modeRef.current;
+    if (cur.tag === 'draw_new') setMode({ tag: 'confirm_new' });
+    else if (cur.tag === 'draw_exclusion') setMode({ tag: 'confirm_exclusion', zone: cur.zone });
+  }, [setMode]);
+
+  const undoLastPoint = useCallback(() => {
+    const map = mapInst.current;
+    const last = customMarkers.current.pop();
+    if (last && map) last.remove();
+    setLivePointCount(customMarkers.current.length);
+    updatePolygonPreview(modeRef.current.tag === 'draw_exclusion' ? T.red : T.teal);
+  }, [updatePolygonPreview]);
+
   const startDrawNewMode = useCallback((color: string) => {
-    const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L) return;
     clearDraw();
+    startCustomDraw(color);
+  }, [clearDraw, startCustomDraw]);
 
-    // Starter rectangle centred on the current view (~40% of visible area)
-    const b = map.getBounds();
-    const latPad = (b.getNorth() - b.getSouth()) * 0.28;
-    const lngPad = (b.getEast()  - b.getWest())  * 0.28;
-    const starter: [number, number][] = [
-      [b.getNorth() - latPad, b.getWest() + lngPad],
-      [b.getNorth() - latPad, b.getEast() - lngPad],
-      [b.getSouth() + latPad, b.getEast() - lngPad],
-      [b.getSouth() + latPad, b.getWest() + lngPad],
-    ];
-
-    const layer = L.polygon(starter, {
-      color, fillColor: color, fillOpacity: 0.18, weight: 2.5,
-    });
-    drawFG.current.addLayer(layer);
-    editingLayer.current = layer;
-    drawnPts.current = starter.map(([lat, lng]) => ({ lat, lng }));
-
-    // Edit-only toolbar — no draw tools, only vertex drag
-    const ctrl = new (L as any).Control.Draw({
-      position: 'topleft',
-      edit: {
-        featureGroup: drawFG.current,
-        edit: { selectedPathOptions: { color, fillColor: color } },
-        remove: false,
-      },
-      draw: {
-        polygon: false, polyline: false, circle: false,
-        circlemarker: false, rectangle: false, marker: false,
-      },
-    });
-    map.addControl(ctrl);
-    drawCtrl.current = ctrl;
-
-    // Auto-activate handles immediately
-    setTimeout(() => {
-      (document.querySelector('.leaflet-draw-edit-edit') as HTMLElement | null)?.click();
-    }, 150);
-  }, [clearDraw]);
-
-  /**
-   * startExclusionDrawMode — places a starter rectangle on the zone centroid,
-   * then activates leaflet-draw vertex handles (same UX as Edit Zone Shape).
-   * User drags handles to define the cut-out area, then clicks Save Cut-out.
-   */
   const startExclusionDrawMode = useCallback((zone: Zone) => {
-    const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L) return;
     clearDraw();
 
-    // Fit map to zone so user can see what they're cutting
-    const zonePts = zone.polygon;
-    const L2 = Lref.current;
-    if (zonePts.length && mapInst.current) {
-      try {
-        const tempPoly = L2.polygon(zonePts.map((c: Coord) => [c.lat, c.lng]));
-        mapInst.current.fitBounds(tempPoly.getBounds(), { padding: [50, 50] });
-      } catch {}
+    // Fit to zone
+    const coords = zone.polygon.map(c => [c.lng, c.lat]);
+    if (coords.length) {
+      const bounds = coords.reduce((b, c) => b.extend(c), new OlaMaps.LngLatBounds(coords[0], coords[0]));
+      mapInst.current?.fitBounds(bounds, { padding: 60 });
     }
 
-    // Starter rectangle: centred on zone, ~12% of view
-    const pts  = zone.polygon;
-    const cLat = pts.reduce((s: number, p: Coord) => s + p.lat, 0) / pts.length;
-    const cLng = pts.reduce((s: number, p: Coord) => s + p.lng, 0) / pts.length;
-    const b      = map.getBounds();
-    const latPad = (b.getNorth() - b.getSouth()) * 0.10;
-    const lngPad = (b.getEast()  - b.getWest())  * 0.10;
-    const starter: [number, number][] = [
-      [cLat + latPad, cLng - lngPad],
-      [cLat + latPad, cLng + lngPad],
-      [cLat - latPad, cLng + lngPad],
-      [cLat - latPad, cLng - lngPad],
-    ];
+    startCustomDraw(T.red);
+  }, [clearDraw, startCustomDraw]);
 
-    const layer = L.polygon(starter, {
-      color: T.red, fillColor: T.red, fillOpacity: 0.22, weight: 2.5, dashArray: '6 4',
-    });
-    drawFG.current.addLayer(layer);
-    editingLayer.current = layer;
-    drawnPts.current = starter.map(([lat, lng]) => ({ lat, lng }));
-
-    const ctrl = new (L as any).Control.Draw({
-      position: 'topleft',
-      edit: {
-        featureGroup: drawFG.current,
-        edit: { selectedPathOptions: { color: T.red, fillColor: T.red } },
-        remove: false,
-      },
-      draw: {
-        polygon: false, polyline: false, circle: false,
-        circlemarker: false, rectangle: false, marker: false,
-      },
-    });
-    map.addControl(ctrl);
-    drawCtrl.current = ctrl;
-
-    setTimeout(() => {
-      (document.querySelector('.leaflet-draw-edit-edit') as HTMLElement | null)?.click();
-    }, 200);
-  }, [clearDraw]);
-
-  /**
-   * Enter edit mode for an existing zone polygon.
-   * Loads the polygon into drawFG so Leaflet-Draw vertex handles appear.
-   * The user drags handles to reshape, then clicks our "Save Shape" button.
-   */
   const startEditMode = useCallback((zone: Zone) => {
-    const map = mapInst.current;
-    const L   = Lref.current;
-    if (!map || !L) return;
     clearDraw();
 
-    // Load the zone's polygon into drawFG as an editable layer
-    const layer = L.polygon(
-      zone.polygon.map((c: Coord) => [c.lat, c.lng] as [number, number]),
-      { color: T.amber, fillColor: T.amber, fillOpacity: 0.22, weight: 2.5 }
-    );
-    drawFG.current.addLayer(layer);
-    editingLayer.current = layer;
-    // Seed drawnPts with current polygon (so Save works even if user doesn't drag)
+    const coords = zone.polygon.map(c => [c.lng, c.lat]);
+    coords.push(coords[0]);
+
     drawnPts.current = zone.polygon.map(c => ({ ...c }));
 
-    // Mount edit-only Draw toolbar
-    const ctrl = new (L as any).Control.Draw({
-      position: 'topleft',
-      edit: {
-        featureGroup: drawFG.current,
-        edit: { selectedPathOptions: { color: T.amber, fillColor: T.amber } },
-        remove: false,
-      },
-      draw: {
-        polygon: false, polyline: false, circle: false,
-        circlemarker: false, rectangle: false, marker: false,
-      },
+    const geojson = {
+      type: 'Feature' as const,
+      geometry: { type: 'Polygon' as const, coordinates: [coords] },
+      properties: {},
+    };
+
+    const map = mapInst.current;
+    if (!map) return;
+
+    if (map.getSource('edit-zone')) {
+      map.removeLayer('edit-zone-fill');
+      map.removeLayer('edit-zone-outline');
+      map.removeSource('edit-zone');
+    }
+
+    map.addSource('edit-zone', { type: 'geojson', data: geojson });
+    map.addLayer({
+      id: 'edit-zone-fill',
+      type: 'fill',
+      source: 'edit-zone',
+      paint: { 'fill-color': T.amber, 'fill-opacity': 0.22 },
     });
-    map.addControl(ctrl);
-    drawCtrl.current = ctrl;
+    map.addLayer({
+      id: 'edit-zone-outline',
+      type: 'line',
+      source: 'edit-zone',
+      paint: { 'line-color': T.amber, 'line-width': 2.5 },
+    });
 
-    // Auto-click the edit (pencil) button so handles appear immediately
-    setTimeout(() => {
-      const editBtn = document.querySelector('.leaflet-draw-edit-edit') as HTMLElement | null;
-      editBtn?.click();
+    // Create draggable markers for each vertex
+    zone.polygon.forEach((coord, idx) => {
+      const el = makeMarkerEl('#ffffff', String(idx + 1), 14);
+      const marker = new OlaMaps.Marker({ element: el, draggable: true })
+        .setLngLat([coord.lng, coord.lat])
+        .addTo(map);
 
-      // Intercept the toolbar's own "Save" button — route it through our save
-      setTimeout(() => {
-        const toolbarSave = document.querySelector('.leaflet-draw-actions a[title="Save changes"]') as HTMLElement | null;
-        if (toolbarSave) {
-          toolbarSave.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            // Harvest latest coords from the layer
-            const lyr = editingLayer.current;
-            if (lyr) {
-              const latlngs = lyr.getLatLngs();
-              const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
-              drawnPts.current = ring.map((p: any) => ({
-                lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6),
-              }));
-            }
-          }, { once: true });
-        }
-      }, 300);
-    }, 150);
+      marker.on('dragend', () => {
+        const ll = marker.getLngLat();
+        drawnPts.current[idx] = { lat: ll.lat, lng: ll.lng };
+        updateEditPolygon();
+      });
+
+      customMarkers.current.push(marker);
+    });
   }, [clearDraw]);
+
+  const updateEditPolygon = useCallback(() => {
+    const map = mapInst.current;
+    if (!map) return;
+
+    const coords = drawnPts.current.map(c => [c.lng, c.lat]);
+    coords.push(coords[0]);
+
+    const geojson = {
+      type: 'Feature' as const,
+      geometry: { type: 'Polygon' as const, coordinates: [coords] },
+      properties: {},
+    };
+
+    if (map.getSource('edit-zone')) {
+      (map.getSource('edit-zone') as any).setData(geojson);
+    }
+  }, []);
 
   const cancelDraw = useCallback(() => {
     clearDraw();
@@ -973,28 +861,22 @@ export default function ServiceAreaManagement() {
     }
   }, [clearDraw, setMode]);
 
-  /**
-   * Called from draw_new "Save Zone" button.
-   * Harvests the latest coords from the editable layer, then goes to confirm_new.
-   */
   const finishDrawNew = useCallback(() => {
-    const lyr = editingLayer.current;
-    if (lyr) {
-      const latlngs = lyr.getLatLngs();
-      const ring = Array.isArray(latlngs[0]) ? latlngs[0] : latlngs;
-      drawnPts.current = ring.map((p: any) => ({
-        lat: +p.lat.toFixed(6), lng: +p.lng.toFixed(6),
-      }));
+    if (drawnPts.current.length < 3 && customMarkers.current.length >= 3) {
+      drawnPts.current = customMarkers.current.map(m => {
+        const ll = m.getLngLat();
+        return { lat: ll.lat, lng: ll.lng };
+      });
     }
     if (drawnPts.current.length < 3) {
-      alert('Shape needs at least 3 points — drag the handles to reshape first.');
+      alert('Shape needs at least 3 points.');
       return;
     }
     setMode({ tag: 'confirm_new' });
   }, [setMode]);
 
   const flyTo = (coords: [number, number]) =>
-    mapInst.current?.flyTo(coords, 12, { duration: 1.1 });
+    mapInst.current?.flyTo({ center: [coords[1], coords[0]], zoom: 12, duration: 1100 });
 
   /* ───────────────────── DERIVED ───────────────────── */
   const totalActive   = zones.filter(z => z.serviceEnabled).length;
@@ -1008,13 +890,10 @@ export default function ServiceAreaManagement() {
      SIDEBAR CONTENT
   ═══════════════════════════════════════════════════════════ */
   const renderSidebar = () => {
-
-    /* ── DETAIL / EDITING panels check for zone in mode ── */
     if (mode.tag === 'detail') {
       const zone = mode.zone;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          {/* Header */}
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${T.line}`,
             display: 'flex', alignItems: 'center', gap: 8 }}>
             <button onClick={() => { clearDraw(); setMode({ tag: 'idle' }); }}
@@ -1033,7 +912,6 @@ export default function ServiceAreaManagement() {
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '13px 14px' }}>
-            {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7, marginBottom: 14 }}>
               {[
                 { l: 'Points',   v: zone.polygon?.length ?? 0,   c: T.blue   },
@@ -1050,7 +928,6 @@ export default function ServiceAreaManagement() {
               ))}
             </div>
 
-            {/* Rename */}
             {renaming === zone._id ? (
               <div style={{ marginBottom: 12 }}>
                 <Lbl>New Name</Lbl>
@@ -1072,32 +949,21 @@ export default function ServiceAreaManagement() {
 
             <HR />
 
-            {/* Zone actions */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
-              {/* Edit shape */}
               <Button v="tonal" accent={T.amber} full
                 onClick={() => {
                   startEditMode(zone);
                   setMode({ tag: 'editing', zone });
-                  // Fit map to this zone after a short delay (layer needs to be added first)
-                  setTimeout(() => {
-                    const lyr = editingLayer.current;
-                    if (lyr && mapInst.current) {
-                      try { mapInst.current.fitBounds(lyr.getBounds(), { padding: [60, 60] }); } catch {}
-                    }
-                  }, 300);
                 }}>
                 🔧 Edit Zone Shape
               </Button>
 
-              {/* Toggle */}
               <Button v={zone.serviceEnabled ? 'warn' : 'tonal'}
                 accent={zone.serviceEnabled ? T.amber : T.teal} full
                 onClick={() => toggleZone(zone)}>
                 {zone.serviceEnabled ? '⏸ Disable Zone' : '▶ Enable Zone'}
               </Button>
 
-              {/* Cut out */}
               <Button v="tonal" accent={T.red} full
                 onClick={() => {
                   setExLabel('');
@@ -1107,13 +973,11 @@ export default function ServiceAreaManagement() {
                 ✂️ Cut Area Out of Zone
               </Button>
 
-              {/* Delete */}
               <Button v="danger" full onClick={() => deleteZone(zone)}>
                 🗑️ Delete Zone
               </Button>
             </div>
 
-            {/* Exclusion list */}
             {(zone.exclusionZones?.length ?? 0) > 0 && (
               <>
                 <HR />
@@ -1142,12 +1006,10 @@ export default function ServiceAreaManagement() {
       );
     }
 
-    /* ── EDITING ── */
     if (mode.tag === 'editing') {
       const zone = mode.zone;
       return (
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: T.amber, flexShrink: 0 }} />
             <span style={{ fontSize: 13, fontWeight: 800, color: T.amber }}>Editing Boundary</span>
@@ -1158,7 +1020,6 @@ export default function ServiceAreaManagement() {
             {zone.name}
           </div>
 
-          {/* Step guide */}
           <div style={{ padding: '11px 13px', borderRadius: 10,
             background: T.amber + '0c', border: `1px solid ${T.amber}28` }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: T.amber,
@@ -1166,9 +1027,9 @@ export default function ServiceAreaManagement() {
               How to Edit
             </div>
             {[
-              { n: '1', t: 'Drag white handles', d: 'Pull existing vertices to reshape' },
-              { n: '2', t: 'Click edge midpoints', d: 'Add new vertices anywhere on the border' },
-              { n: '3', t: 'Click Save Shape', d: 'Saves your new boundary to the server' },
+              { n: '1', t: 'Drag markers', d: 'Pull numbered markers to reshape' },
+              { n: '2', t: 'Adjust boundary', d: 'Move vertices to match real borders' },
+              { n: '3', t: 'Click Save Shape', d: 'Saves your new boundary' },
             ].map(s => (
               <div key={s.n} style={{ display: 'flex', gap: 9, marginBottom: 7, alignItems: 'flex-start' }}>
                 <div style={{ width: 18, height: 18, borderRadius: '50%',
@@ -1185,16 +1046,6 @@ export default function ServiceAreaManagement() {
             ))}
           </div>
 
-          {/* Fit to zone */}
-          <Button v="ghost" full onClick={() => {
-            const lyr = editingLayer.current;
-            if (lyr && mapInst.current) {
-              try { mapInst.current.fitBounds(lyr.getBounds(), { padding: [40, 40] }); } catch {}
-            }
-          }}>
-            🔍 Fit Map to Zone
-          </Button>
-
           <Button v="fill" accent={T.amber} full disabled={saving}
             onClick={() => saveEditedZone(zone)}
             style={{ padding: '12px 0', fontSize: 13 }}>
@@ -1206,23 +1057,12 @@ export default function ServiceAreaManagement() {
           }}>
             ✕ Cancel Editing
           </Button>
-
-          <div style={{ padding: '8px 10px', borderRadius: 7,
-            background: T.bg0, border: `1px solid ${T.line}`,
-            fontSize: 10, color: T.t3, lineHeight: 1.6, textAlign: 'center' }}>
-            💡 The polygon outline on the map is now<br />
-            editable — handles are white circles
-          </div>
         </div>
       );
     }
 
-    /* ── DRAW NEW ── */
-    /* ── DRAW NEW ── */
     if (mode.tag === 'draw_new') return (
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: T.teal,
             flexShrink: 0, animation: 'sam-pulse 1.5s infinite' }} />
@@ -1231,10 +1071,9 @@ export default function ServiceAreaManagement() {
 
         <div style={{ fontSize: 12, fontWeight: 700, color: T.t3,
           padding: '6px 10px', borderRadius: 7, background: T.bg0, border: `1px solid ${T.line}` }}>
-          Reshape the teal polygon to match your zone boundary
+          Click map to place vertices ({livePointCount} points)
         </div>
 
-        {/* Step guide — same structure as editing panel */}
         <div style={{ padding: '11px 13px', borderRadius: 10,
           background: T.teal + '0c', border: `1px solid ${T.teal}28` }}>
           <div style={{ fontSize: 11, fontWeight: 800, color: T.teal,
@@ -1242,18 +1081,16 @@ export default function ServiceAreaManagement() {
             How to Draw
           </div>
           {[
-            { n: '1', t: 'Drag white handles', d: 'Pull existing vertices to reshape' },
-            { n: '2', t: 'Click edge midpoints', d: 'Add new vertices anywhere on the border' },
-            { n: '3', t: 'Click Save Zone', d: 'Name it and save to the server' },
+            { n: '1', t: 'Click map', d: 'Place vertices around your zone' },
+            { n: '2', t: 'Min 3 points', d: 'Need at least 3 to form polygon' },
+            { n: '3', t: 'Click Finish', d: 'Complete and name your zone' },
           ].map(s => (
             <div key={s.n} style={{ display: 'flex', gap: 9, marginBottom: 7, alignItems: 'flex-start' }}>
-              <div style={{
-                width: 18, height: 18, borderRadius: '50%',
+              <div style={{ width: 18, height: 18, borderRadius: '50%',
                 background: T.teal, color: '#000',
                 fontSize: 9, fontWeight: 900,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                flexShrink: 0, marginTop: 1,
-              }}>
+                flexShrink: 0, marginTop: 1 }}>
                 {s.n}
               </div>
               <div>
@@ -1264,20 +1101,17 @@ export default function ServiceAreaManagement() {
           ))}
         </div>
 
-        {/* Fit map to starter shape */}
-        <Button v="ghost" full onClick={() => {
-          const lyr = editingLayer.current;
-          if (lyr && mapInst.current) {
-            try { mapInst.current.fitBounds(lyr.getBounds(), { padding: [60, 60] }); } catch {}
-          }
-        }}>
-          🔍 Fit Map to Shape
-        </Button>
+        {livePointCount > 0 && (
+          <Button v="warn" full onClick={undoLastPoint}>
+            ↶ Undo Last Point
+          </Button>
+        )}
 
         <Button v="fill" accent={T.teal} full
-          onClick={finishDrawNew}
+          disabled={livePointCount < 3}
+          onClick={finishCustomDraw}
           style={{ padding: '12px 0', fontSize: 13 }}>
-          ✅ Save Zone
+          ✅ Finish Drawing ({livePointCount} pts)
         </Button>
 
         <Button v="danger" full onClick={() => {
@@ -1285,17 +1119,9 @@ export default function ServiceAreaManagement() {
         }}>
           ✕ Cancel Drawing
         </Button>
-
-        <div style={{ padding: '8px 10px', borderRadius: 7,
-          background: T.bg0, border: `1px solid ${T.line}`,
-          fontSize: 10, color: T.t3, lineHeight: 1.6, textAlign: 'center' }}>
-          💡 The teal polygon on the map is editable<br />
-          — white circles are draggable handles
-        </div>
       </div>
     );
 
-    /* ── CONFIRM NEW ── */
     if (mode.tag === 'confirm_new') return (
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11 }}>
         <div style={{ padding: '10px 12px', borderRadius: 9,
@@ -1332,18 +1158,15 @@ export default function ServiceAreaManagement() {
       </div>
     );
 
-    /* ── DRAW EXCLUSION ── */
     if (mode.tag === 'draw_exclusion') {
       const zone = mode.zone;
       return (
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* Header */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: T.red, flexShrink: 0 }} />
             <span style={{ fontSize: 13, fontWeight: 800, color: T.red }}>Drawing Cut-out</span>
           </div>
 
-          {/* Zone name badge */}
           <div style={{ fontSize: 12, fontWeight: 700, color: T.t1,
             padding: '6px 10px', borderRadius: 7, background: T.bg0,
             border: `1px solid ${T.line}`, overflow: 'hidden',
@@ -1351,69 +1174,29 @@ export default function ServiceAreaManagement() {
             ✂️ Cutting inside: <span style={{ color: '#fca5a5' }}>{zone.name}</span>
           </div>
 
-          {/* Step guide — mirrors Edit Zone Shape panel */}
-          <div style={{ padding: '11px 13px', borderRadius: 10,
-            background: T.red + '0c', border: `1px solid ${T.red}28` }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: T.red,
-              textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: 8 }}>
-              How to Draw Cut-out
-            </div>
-            {[
-              { n: '1', t: 'Drag white handles', d: 'Pull existing vertices to reshape the red area' },
-              { n: '2', t: 'Click edge midpoints', d: 'Add new vertices anywhere on the border' },
-              { n: '3', t: 'Click Save Cut-out', d: 'Blocks service inside this area permanently' },
-            ].map(s => (
-              <div key={s.n} style={{ display: 'flex', gap: 9, marginBottom: 7, alignItems: 'flex-start' }}>
-                <div style={{
-                  width: 18, height: 18, borderRadius: '50%',
-                  background: T.red, color: '#fff',
-                  fontSize: 9, fontWeight: 900,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  flexShrink: 0, marginTop: 1,
-                }}>
-                  {s.n}
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: T.t1 }}>{s.t}</div>
-                  <div style={{ fontSize: 11, color: T.t3 }}>{s.d}</div>
-                </div>
-              </div>
-            ))}
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.t3,
+            padding: '6px 10px', borderRadius: 7, background: T.bg0, border: `1px solid ${T.line}` }}>
+            Click map to place cut-out vertices ({livePointCount} points)
           </div>
 
-          {/* Label input — inline so user can name before saving */}
           <div>
-            <div style={{ fontSize: 10, fontWeight: 800, color: T.t3,
-              textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 5 }}>
-              Cut-out Label (optional)
-            </div>
-            <input
-              value={exLabel}
+            <Lbl>Cut-out Label (optional)</Lbl>
+            <Input value={exLabel}
               onChange={e => setExLabel(e.target.value)}
-              placeholder="e.g. Airport, Lake, Highway…"
-              style={{
-                width: '100%', padding: '9px 12px', fontSize: 13, color: T.t1,
-                background: T.bg1, border: `1.5px solid ${T.line2}`,
-                borderRadius: 8, outline: 'none', fontFamily: 'inherit',
-                boxSizing: 'border-box' as const,
-              }}
-            />
+              placeholder="e.g. Airport, Lake…" />
           </div>
 
-          {/* Fit to zone */}
-          <Button v="ghost" full onClick={() => {
-            const lyr = editingLayer.current;
-            if (lyr && mapInst.current) {
-              try { mapInst.current.fitBounds(lyr.getBounds(), { padding: [40, 40] }); } catch {}
-            }
-          }}>
-            🔍 Fit Map to Cut-out Shape
-          </Button>
+          {livePointCount > 0 && (
+            <Button v="warn" full onClick={undoLastPoint}>
+              ↶ Undo Last Point
+            </Button>
+          )}
 
-          <Button v="fill" accent={T.red} full disabled={saving}
-            onClick={() => saveExclusionDraw(zone)}
+          <Button v="fill" accent={T.red} full
+            disabled={livePointCount < 3}
+            onClick={finishCustomDraw}
             style={{ padding: '12px 0', fontSize: 13 }}>
-            {saving ? <><Spin />Saving…</> : '✂️ Save Cut-out'}
+            ✂️ Finish Cut-out ({livePointCount} pts)
           </Button>
 
           <Button v="danger" full onClick={() => {
@@ -1421,18 +1204,10 @@ export default function ServiceAreaManagement() {
           }}>
             ✕ Cancel
           </Button>
-
-          <div style={{ padding: '8px 10px', borderRadius: 7,
-            background: T.bg0, border: `1px solid ${T.line}`,
-            fontSize: 10, color: T.t3, lineHeight: 1.6, textAlign: 'center' }}>
-            💡 The red polygon on the map is editable<br />
-            — white circles are draggable handles
-          </div>
         </div>
       );
     }
 
-    /* ── CONFIRM EXCLUSION ── */
     if (mode.tag === 'confirm_exclusion') {
       const zone = mode.zone;
       return (
@@ -1442,7 +1217,6 @@ export default function ServiceAreaManagement() {
             <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>✂️ Cut-out ready</div>
             <div style={{ fontSize: 11, color: T.t3, marginTop: 3 }}>
               {drawnPts.current.length} pts · ~{km2(drawnPts.current).toFixed(2)} km²
-              <br />Blocks service inside <b style={{ color: '#fca5a5' }}>{zone.name}</b>
             </div>
           </div>
           <div>
@@ -1468,8 +1242,6 @@ export default function ServiceAreaManagement() {
     /* ══ IDLE HOME ══ */
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
-
-        {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: `1px solid ${T.line}`, flexShrink: 0 }}>
           {(['generate', 'zones'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
@@ -1484,11 +1256,10 @@ export default function ServiceAreaManagement() {
           ))}
         </div>
 
-        {/* ── GENERATE TAB ── */}
         {tab === 'generate' && (
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px' }}>
             <div style={{ fontSize: 12, color: T.t2, lineHeight: 1.7, marginBottom: 14, padding: '10px 12px', borderRadius: 9, background: T.bg0, border: `1px solid ${T.line}` }}>
-              Type a <b style={{ color: T.teal }}>city or state name</b> to automatically load all clusters from OpenStreetMap boundaries.
+              Type a <b style={{ color: T.teal }}>city or state name</b> to automatically load clusters from OpenStreetMap.
             </div>
 
             <Lbl>City or State Name</Lbl>
@@ -1560,8 +1331,6 @@ export default function ServiceAreaManagement() {
             </div>
 
             <HR />
-
-            {/* Manual draw option */}
             <Button v="ghost" full
               onClick={() => { setNewName(''); setNewType('cluster'); setMode({ tag: 'draw_new' }); startDrawNewMode(T.teal); }}>
               ✏️ Draw Zone Manually
@@ -1569,10 +1338,8 @@ export default function ServiceAreaManagement() {
           </div>
         )}
 
-        {/* ── ZONES TAB ── */}
         {tab === 'zones' && (
           <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            {/* Filter chips */}
             <div style={{ padding: '8px 10px', borderBottom: `1px solid ${T.line}`,
               display: 'flex', gap: 5, flexShrink: 0 }}>
               {(['all', 'city', 'cluster', 'area'] as const).map(f => (
@@ -1588,7 +1355,6 @@ export default function ServiceAreaManagement() {
               ))}
             </div>
 
-            {/* Zone list */}
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {loading && (
                 <div style={{ padding: 24, textAlign: 'center', color: T.t3 }}>
@@ -1628,14 +1394,12 @@ export default function ServiceAreaManagement() {
       fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif",
       background: T.bg0, color: T.t1 }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         button:disabled { opacity: .4 !important; cursor: not-allowed !important; }
-        .leaflet-container { font-family: 'DM Sans', sans-serif; background: ${T.bg0}; }
-        .leaflet-draw-toolbar a { background-color: ${T.bg2} !important; color: ${T.t1} !important; border-color: ${T.line} !important; }
-        .leaflet-draw-toolbar a:hover { background-color: ${T.bg3} !important; }
         @keyframes sam-spin { to { transform: rotate(360deg); } }
         @keyframes sam-progress { from { margin-left: 0; width: 50%; } to { margin-left: 50%; width: 40%; } }
+        @keyframes sam-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
         ::-webkit-scrollbar { width: 4px; }
         ::-webkit-scrollbar-thumb { background: ${T.line2}; border-radius: 4px; }
         select option { background: ${T.bg2}; color: ${T.t1}; }
@@ -1643,12 +1407,10 @@ export default function ServiceAreaManagement() {
 
       {toast && <Toast msg={toast} clear={() => setToast(null)} />}
 
-      {/* ── TOP BAR ─────────────────────────────────────────── */}
+      {/* TOP BAR */}
       <div style={{ background: T.bg2, borderBottom: `1px solid ${T.line}`,
         padding: '0 18px', height: 52, display: 'flex', alignItems: 'center',
         gap: 14, flexShrink: 0 }}>
-
-        {/* Brand */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginRight: 4 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8,
             background: `linear-gradient(135deg,${T.teal},${T.blue})`,
@@ -1661,7 +1423,6 @@ export default function ServiceAreaManagement() {
           </div>
         </div>
 
-        {/* Stats */}
         <div style={{ display: 'flex', gap: 8 }}>
           {[
             { l: 'Cities',   v: cityCount,    c: T.city    },
@@ -1681,7 +1442,6 @@ export default function ServiceAreaManagement() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Hierarchy legend */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8,
           padding: '5px 12px', borderRadius: 8, background: T.bg0,
           border: `1px solid ${T.line}`, fontSize: 11, color: T.t3 }}>
@@ -1701,41 +1461,39 @@ export default function ServiceAreaManagement() {
         </button>
       </div>
 
-      {/* ── BODY ─────────────────────────────────────────────── */}
+      {/* BODY */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-
-        {/* ── SIDEBAR ── */}
         <div style={{ width: 300, background: T.bg2, borderRight: `1px solid ${T.line}`,
           display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 }}>
           {renderSidebar()}
         </div>
 
-        {/* ── MAP ── */}
         <div style={{ flex: 1, position: 'relative' }}>
-          <div ref={mapDiv} style={{ width: '100%', height: '100%' }} />
+          {!MAPS_KEY ? (
+            <div style={{
+              height: '100%', background: T.bg0, borderRadius: 12,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              border: '1px dashed ' + T.line, gap: 10,
+            }}>
+              <span style={{ fontSize: '2rem' }}>🗺️</span>
+              <div style={{ color: T.t3, fontSize: '0.82rem', fontFamily: 'monospace', textAlign: 'center' }}>
+                Add <span style={{ color: T.teal }}>VITE_OLA_MAPS_KEY</span> to your{' '}
+                <span style={{ color: T.amber }}>.env</span> file
+              </div>
+            </div>
+          ) : (
+            <div ref={mapDiv} style={{ width: '100%', height: '100%' }} />
+          )}
 
-          {/* Loading overlay */}
-          {!mapReady && (
+          {!mapReady && MAPS_KEY && (
             <div style={{ position: 'absolute', inset: 0, background: T.bg0,
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               justifyContent: 'center', gap: 16 }}>
               <Spin size={40} color={T.teal} />
-              <div style={{ color: T.t3, fontSize: 13 }}>Initialising map…</div>
+              <div style={{ color: T.t3, fontSize: 13 }}>Initialising Ola Maps…</div>
             </div>
           )}
 
-          {/* Auto-generating overlay */}
-          {mode.tag === 'generating' && (
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(7,13,26,.7)',
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              justifyContent: 'center', gap: 16, backdropFilter: 'blur(4px)' }}>
-              <Spin size={44} color={T.teal} />
-              <div style={{ fontSize: 15, fontWeight: 700, color: T.teal }}>Loading clusters…</div>
-              <div style={{ fontSize: 12, color: T.t3 }}>Fetching boundaries from OpenStreetMap</div>
-            </div>
-          )}
-
-          {/* Drawing hint HUD */}
           {(mode.tag === 'draw_new' || mode.tag === 'draw_exclusion' || mode.tag === 'editing') && (
             <div style={{
               position: 'absolute', top: 14, left: '50%', transform: 'translateX(-50%)',
@@ -1749,13 +1507,12 @@ export default function ServiceAreaManagement() {
               fontSize: 12, fontWeight: 700, pointerEvents: 'none',
               whiteSpace: 'nowrap', zIndex: 1000,
             }}>
-              {mode.tag === 'draw_new'       && '✏️  Drag white handles to reshape · Click edge midpoints to add vertices'}
-              {mode.tag === 'draw_exclusion' && '✂️  Drag white handles to reshape · Click edge midpoints to add vertices · Click Save Cut-out when done'}
-              {mode.tag === 'editing'        && '🔧  Drag white handles to reshape · Click Save Shape when done'}
+              {mode.tag === 'draw_new'       && '✏️ Click map to place vertices · Min 3 points required'}
+              {mode.tag === 'draw_exclusion' && '✂️ Click map to place cut-out vertices · Right-click marker to delete'}
+              {mode.tag === 'editing'        && '🔧 Drag numbered markers to reshape boundary'}
             </div>
           )}
 
-          {/* Empty state */}
           {mapReady && zones.length === 0 && !loading && mode.tag === 'idle' && (
             <div style={{
               position: 'absolute', bottom: 28, left: '50%', transform: 'translateX(-50%)',
