@@ -41,6 +41,8 @@ interface AppSettings {
     enabled: boolean;
     discountAmount: number;
     fareAdjustment: number;
+    vehicleType?: string;
+    exactAmount?: number | null;
     code: string;
     validityDays: number;
   };
@@ -192,6 +194,17 @@ const getVehicleBadges = (vehicles: string[]) => {
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+
+const getVehicleLabel = (vehicleType?: string) => {
+  return VEHICLE_OPTIONS.find((o) => o.value === (vehicleType || 'all'))?.label || 'All Vehicles';
+};
+
+const getWelcomeShownAmount = (welcomeCoupon: AppSettings['welcomeCoupon']) => {
+  const netSaving = welcomeCoupon.discountAmount - welcomeCoupon.fareAdjustment;
+  return welcomeCoupon.exactAmount && welcomeCoupon.exactAmount > 0
+    ? welcomeCoupon.exactAmount
+    : Math.max(netSaving, 0);
+};
 
 type Tab = 'coupons' | 'reward-config' | 'referrals';
 
@@ -854,6 +867,10 @@ const RewardConfigTab: React.FC<{
   );
   if (!settings) return null;
 
+  const welcomeShownAmount = getWelcomeShownAmount(settings.welcomeCoupon);
+  const welcomeNetSaving = settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment;
+  const welcomeVehicleType = settings.welcomeCoupon.vehicleType || 'all';
+
   const SectionCard = ({ icon, title, subtitle, children }: { icon: string; title: string; subtitle: string; children: React.ReactNode }) => (
     <div className="bg-white rounded-2xl border shadow-sm p-6">
       <div className="flex items-center gap-3 mb-5">
@@ -933,6 +950,8 @@ const RewardConfigTab: React.FC<{
             Code: <strong>{settings.welcomeCoupon.code}</strong> &nbsp;·&nbsp;
             Discount: <strong>₹{settings.welcomeCoupon.discountAmount}</strong> &nbsp;·&nbsp;
             Internal markup: <strong>₹{settings.welcomeCoupon.fareAdjustment}</strong> &nbsp;·&nbsp;
+            Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong> &nbsp;Â·&nbsp;
+            Exact shown: <strong>&#8377;{welcomeShownAmount}</strong> &nbsp;Â·&nbsp;
             Net saving to customer:{' '}
             <strong style={{ color: settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment <= 0 ? '#dc2626' : 'inherit' }}>
               ₹{settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment}
@@ -1007,16 +1026,35 @@ const RewardConfigTab: React.FC<{
           <Field label="Coupon Code">
             <input value={settings.welcomeCoupon.code} onChange={(e) => update('welcomeCoupon', 'code', e.target.value.toUpperCase())} className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 uppercase font-mono" />
           </Field>
+          <Field label="Vehicle Type" hint="Welcome coupon will show and apply only for this vehicle">
+            <select
+              value={welcomeVehicleType}
+              onChange={(e) => update('welcomeCoupon', 'vehicleType', e.target.value)}
+              className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            >
+              {VEHICLE_OPTIONS.map((vehicle) => (
+                <option key={vehicle.value} value={vehicle.value}>
+                  {vehicle.label}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Discount Amount (₹)" hint="How much off the customer gets">
             <NumInput value={settings.welcomeCoupon.discountAmount} onChange={(v) => update('welcomeCoupon', 'discountAmount', v)} min={1} />
           </Field>
           <Field label="Internal Fare Adjustment (₹)" hint="Added to fare before discount is applied (not shown to customer)">
             <NumInput value={settings.welcomeCoupon.fareAdjustment} onChange={(v) => update('welcomeCoupon', 'fareAdjustment', v)} min={0} />
           </Field>
+          <Field label="Exact Amount Shown (Rs)" hint="Amount displayed on the welcome coupon banner">
+            <NumInput value={welcomeShownAmount} onChange={(v) => update('welcomeCoupon', 'exactAmount', v)} min={1} />
+          </Field>
           <Field label="Validity (days)" hint="How long new users have to use the coupon">
             <NumInput value={settings.welcomeCoupon.validityDays} onChange={(v) => update('welcomeCoupon', 'validityDays', v)} min={1} />
           </Field>
           <div className="mt-3 p-3 bg-orange-50 rounded-lg text-xs text-orange-700">
+            <div className="mb-1">
+              Banner: <strong>{getVehicleLabel(welcomeVehicleType)}</strong> welcome coupon shows <strong>&#8377;{welcomeShownAmount}</strong>; actual net saving is <strong>&#8377;{welcomeNetSaving}</strong>.
+            </div>
             <strong>Example:</strong> Ride ₹100 → adjusted to ₹{100 + settings.welcomeCoupon.fareAdjustment} → discount ₹{settings.welcomeCoupon.discountAmount} → customer pays <strong>₹{100 + settings.welcomeCoupon.fareAdjustment - settings.welcomeCoupon.discountAmount}</strong>
           </div>
           {/* ⚠️ Warning: fareAdjustment must be less than discountAmount */}
