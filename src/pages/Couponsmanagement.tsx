@@ -44,6 +44,14 @@ interface AppSettings {
     fareAdjustment: number;
     vehicleType?: string;
     exactAmount?: number | null;
+    fixedAmounts?: {
+      all: number | null;
+      bike: number | null;
+      auto: number | null;
+      car: number | null;
+      premium: number | null;
+      xl: number | null;
+    };
     code: string;
     validityDays: number;
   };
@@ -213,10 +221,38 @@ const getVehicleBadges = (vehicles: string[]) => {
 const getVehicleLabel = (vehicleType?: string) =>
   VEHICLE_OPTIONS.find((o) => o.value === (vehicleType || 'all'))?.label || 'All Vehicles';
 
+const normalizeWelcomeFixedAmounts = (
+  fixedAmounts?: Partial<NonNullable<AppSettings['welcomeCoupon']>['fixedAmounts']>,
+  fallbackExactAmount?: number | null,
+) => ({
+  all: fixedAmounts?.all ?? fallbackExactAmount ?? null,
+  bike: fixedAmounts?.bike ?? null,
+  auto: fixedAmounts?.auto ?? null,
+  car: fixedAmounts?.car ?? null,
+  premium: fixedAmounts?.premium ?? null,
+  xl: fixedAmounts?.xl ?? null,
+});
+
+const getWelcomeFixedAmountForVehicle = (
+  welcomeCoupon: AppSettings['welcomeCoupon'],
+  vehicleType: string,
+) => {
+  const fixedAmounts = normalizeWelcomeFixedAmounts(
+    welcomeCoupon.fixedAmounts,
+    welcomeCoupon.exactAmount ?? null,
+  );
+  return (
+    fixedAmounts[vehicleType as keyof typeof fixedAmounts]
+    ?? fixedAmounts.all
+    ?? welcomeCoupon.exactAmount
+    ?? 25
+  );
+};
+
 const getWelcomeShownAmount = (welcomeCoupon: AppSettings['welcomeCoupon']) => {
   // Fixed mode: show exactAmount directly
   if (welcomeCoupon.useFixedWelcomeAmount) {
-    return welcomeCoupon.exactAmount || 25;
+    return getWelcomeFixedAmountForVehicle(welcomeCoupon, welcomeCoupon.vehicleType || 'all');
   }
   // Legacy mode: net saving or exactAmount override
   const netSaving = welcomeCoupon.discountAmount - welcomeCoupon.fareAdjustment;
@@ -948,7 +984,16 @@ const RewardConfigTab: React.FC<{
     setLoading(true);
     try {
       const res = await axios.get(`${API_BASE}/api/admin/reward-config`, getAxiosConfig());
-      if (res.data.success) setSettings(res.data.settings);
+      if (res.data.success) {
+        const incoming = res.data.settings;
+        if (incoming?.welcomeCoupon?.useFixedWelcomeAmount) {
+          incoming.welcomeCoupon.fixedAmounts = normalizeWelcomeFixedAmounts(
+            incoming.welcomeCoupon.fixedAmounts,
+            incoming.welcomeCoupon.exactAmount ?? null,
+          );
+        }
+        setSettings(incoming);
+      }
     } catch { setMessage({ type: 'error', text: 'Failed to load reward config' }); }
     finally { setLoading(false); }
   };
@@ -970,6 +1015,20 @@ const RewardConfigTab: React.FC<{
   const update = (section: keyof AppSettings, key: string, value: any) => {
     if (!settings) return;
     setSettings({ ...settings, [section]: { ...(settings[section] as any), [key]: value } });
+  };
+
+  const updateWelcomeFixedAmount = (vehicle: keyof NonNullable<AppSettings['welcomeCoupon']>['fixedAmounts'], value: number | null) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      welcomeCoupon: {
+        ...settings.welcomeCoupon,
+        fixedAmounts: {
+          ...normalizeWelcomeFixedAmounts(settings.welcomeCoupon.fixedAmounts, settings.welcomeCoupon.exactAmount ?? null),
+          [vehicle]: value,
+        },
+      },
+    });
   };
 
   const getDriverReferral = () => ({
@@ -996,6 +1055,10 @@ const RewardConfigTab: React.FC<{
   const welcomeVehicleType  = settings.welcomeCoupon.vehicleType || 'all';
   const isFixedMode         = settings.welcomeCoupon.useFixedWelcomeAmount === true;
   const fixedAmount         = settings.welcomeCoupon.exactAmount || 25;
+  const fixedAmounts        = normalizeWelcomeFixedAmounts(
+    settings.welcomeCoupon.fixedAmounts,
+    settings.welcomeCoupon.exactAmount ?? null,
+  );
   const welcomeShownAmount  = getWelcomeShownAmount(settings.welcomeCoupon);
   const welcomeNetSaving    = settings.welcomeCoupon.discountAmount - settings.welcomeCoupon.fareAdjustment;
   const legacyInvalid       =
@@ -1229,54 +1292,58 @@ const RewardConfigTab: React.FC<{
           {/* ── FIXED MODE fields ── */}
           {isFixedMode && (
             <>
-              <Field
-                label="Vehicle Type"
-                hint="Welcome coupon applies only for this vehicle type"
-              >
-                <select
-                  value={welcomeVehicleType}
-                  onChange={(e) => update('welcomeCoupon', 'vehicleType', e.target.value)}
-                  className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                >
-                  {VEHICLE_OPTIONS.map((vehicle) => (
-                    <option key={vehicle.value} value={vehicle.value}>
-                      {vehicle.icon} {vehicle.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              <div className="md:col-span-2 rounded-xl border border-orange-200 bg-orange-50 p-4">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <h4 className="font-semibold text-orange-900">Vehicle-specific fixed amounts</h4>
+                    <p className="text-xs text-orange-700">
+                      Set one amount for all vehicles or override individual vehicle types.
+                    </p>
+                  </div>
+                  <span className="text-xs font-semibold text-orange-700 bg-white border border-orange-200 px-2 py-1 rounded-full">
+                    Fallback: All Vehicles
+                  </span>
+                </div>
 
-              <Field
-                label="Fixed Final Fare (₹)"
-                hint={`The EXACT amount the customer pays on their first ride. E.g. ₹${fixedAmount} means they pay ₹${fixedAmount} total regardless of base fare.`}
-              >
-                <NumInput
-                  value={fixedAmount}
-                  onChange={(v) => update('welcomeCoupon', 'exactAmount', v)}
-                  min={1}
-                />
-              </Field>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {VEHICLE_OPTIONS.map((vehicle) => (
+                    <div key={vehicle.value} className="bg-white border border-orange-100 rounded-xl p-3">
+                      <label className="block text-sm font-medium mb-2">
+                        {vehicle.icon} {vehicle.label}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={fixedAmounts[vehicle.value as keyof typeof fixedAmounts] ?? ''}
+                        onChange={(e) => updateWelcomeFixedAmount(
+                          vehicle.value as keyof NonNullable<AppSettings['welcomeCoupon']>['fixedAmounts'],
+                          e.target.value === '' ? null : Number(e.target.value),
+                        )}
+                        placeholder={vehicle.value === 'all' ? 'Default amount for all vehicles' : `Override for ${vehicle.label}`}
+                        className="border rounded-lg w-full p-2 focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
 
               {/* Fixed mode preview */}
               <div className="mt-1 p-3 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-800 space-y-1">
                 <div className="font-bold text-sm mb-2">📋 Fixed Fare Mode Preview</div>
                 <div>
-                  Vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong>
+                  Default vehicle: <strong>{getVehicleLabel(welcomeVehicleType)}</strong>
                 </div>
                 <div>
-                  Customer pays: <strong className="text-green-700 text-base">₹{fixedAmount}</strong>
+                  Customer pays: <strong className="text-green-700 text-base">₹{getWelcomeShownAmount(settings.welcomeCoupon)}</strong>
                 </div>
                 <div>
                   Coupon code: <strong className="font-mono">{settings.welcomeCoupon.code || 'WELCOME'}</strong>
                 </div>
                 <div className="text-green-700 font-semibold mt-1">
-                  ✅ Final fare will be EXACTLY ₹{fixedAmount}
-                  (discount auto-calculated from base fare at booking time)
+                  ✅ Final fare is resolved from the vehicle-specific amount at booking time
                 </div>
                 <div className="mt-2 p-2 bg-white rounded-lg border border-orange-100 text-gray-600">
-                  <strong>Example:</strong> Base fare ₹100 → Customer pays{' '}
-                  <strong>₹{fixedAmount}</strong>{' '}
-                  (₹{Math.max(0, 100 - fixedAmount)} discount applied automatically)
+                  <strong>Example:</strong> Base fare ₹100 → Bike amount ₹{fixedAmounts.bike ?? fixedAmounts.all ?? 25} / Auto amount ₹{fixedAmounts.auto ?? fixedAmounts.all ?? 25}
                 </div>
               </div>
             </>
